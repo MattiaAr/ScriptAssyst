@@ -29,7 +29,7 @@
 .NOTES
     Requisiti: modulo ActiveDirectory (RSAT) e modulo GroupPolicy disponibili sulla macchina
     da cui si esegue lo script (o sulla sessione verso il DC).
-    Versione: v0.2 - menu ristrutturati, albero OU assistito, loop password, annulla universale.
+    Versione: v0.3 - gestione OU/GPO separata e spostamento OU protetto.
 
 .VERSIONHISTORY
     v0.1 (2026-09-21) - Baseline: scheletro completo 5 macro-menu, log narrativo per sessione,
@@ -46,6 +46,13 @@
                          senza perdere il contesto dell'operazione (niente piu' reset da capo).
                          Convenzione "0" per annullare disponibile in ogni prompt di testo libero.
                          Nuova funzione: visualizzazione GPO collegate a una OU scelta dall'albero.
+    v0.3 (2026-09-22) - Conferme annullabili con 0/ANNULLA. Albero OU costruito dalla reale
+                         relazione padre/figlio dei Distinguished Name. Menu OU e GPO separati
+                         per analisi e operazioni. Spostamento OU con controlli su root,
+                         discendenti e ProtectedFromAccidentalDeletion, con ripristino garantito.
+                         Sessioni CIM verso indirizzi IP tramite DCOM con diagnostica dedicata.
+                         Ricerca assistita per OU, GPO, gruppi e task: match esatto seguito da
+                         suggerimenti parziali, scelta numerata o Out-GridView opzionale.
 #>
 
 [CmdletBinding()]
@@ -260,8 +267,9 @@ function Write-LogErrore {
 function Read-ConfermaSiNo {
     param([string]$Prompt = "Confermare l'operazione?")
     do {
-        $val = Read-Host -Prompt "$Prompt (Y/N)"
+        $val = Read-Host -Prompt "$Prompt (Y/N/0 per annullare)"
         $val = $val.Trim().ToUpper()
+        if ($val -eq '0' -or $val -eq 'ANNULLA') { return $null }
     } while ($val -ne 'Y' -and $val -ne 'N')
     return ($val -eq 'Y')
 }
@@ -338,8 +346,17 @@ function Read-PasswordConforme {
     param([string]$Prompt = "Inserire password")
     while ($true) {
         $pwd1 = Read-Host -Prompt "$Prompt (0 per annullare)" -AsSecureString
-        $plainCheck = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($pwd1))
-        if (Test-Annulla -Valore $plainCheck) { return $null }
+        $ptr = [IntPtr]::Zero
+        try {
+            $ptr = [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($pwd1)
+            $plainCheck = [Runtime.InteropServices.Marshal]::PtrToStringUni($ptr)
+            if (Test-Annulla -Valore $plainCheck) { return $null }
+        }
+        finally {
+            if ($ptr -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode($ptr)
+            }
+        }
         return $pwd1
     }
 }
@@ -385,13 +402,106 @@ function Get-OUTree {
         Write-Host "[ERRORE] Impossibile recuperare l'elenco OU: $($_.Exception.Message)" -ForegroundColor Red
         return @()
     }
-    # Ordina per profondita' del DN (numero di componenti OU=) cosi' l'indentazione e' sempre corretta
-    $script:OUTreeCache = $ous | Sort-Object { ($_.DistinguishedName -split ',OU=').Count }, DistinguishedName
+    # Include esplicitamente la root: permette di usarla come OU padre anche se SearchBase
+    # non la restituisce tra i risultati della ricerca subtree.
+    if (-not ($ous | Where-Object { $_.DistinguishedName -eq $OURoot })) {
+        try {
+            $rootOU = Get-ADOrganizationalUnit -Identity $OURoot -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop |
+                Select-Object Name, DistinguishedName
+            $ous = @($rootOU) + @($ous)
+        }
+        catch {
+            Write-Host "[ERRORE] Impossibile recuperare la OU root: $($_.Exception.Message)" -ForegroundColor Red
+            return @()
+        }
+    }
+    $script:OUTreeCache = @($ous | Sort-Object DistinguishedName -Unique)
     return $script:OUTreeCache
 }
 
 function Reset-OUTreeCache {
     $script:OUTreeCache = $null
+}
+
+function Get-ParentDistinguishedName {
+    param([string]$DistinguishedName)
+    # Rimuove il primo RDN rispettando le virgole con escape nel Distinguished Name.
+    return ($DistinguishedName -replace '^(?:\\.|[^,])+,' , '')
+}
+
+# --- Selezione assistita: cerca prima il match esatto, poi propone le corrispondenze parziali ---
+function Select-CandidatoAssistito {
+    param(
+        [object[]]$Candidati,
+        [string]$Prompt,
+        [scriptblock]$GetNome,
+        [scriptblock]$GetDettaglio
+    )
+
+    if (-not $Candidati -or $Candidati.Count -eq 0) {
+        Write-Host "[NOT FOUND] Nessun elemento disponibile per la selezione." -ForegroundColor Yellow
+        return $null
+    }
+
+    while ($true) {
+        $ricerca = Read-InputAnnullabile -Prompt $Prompt
+        if ($null -eq $ricerca) { return $null }
+
+        $esatti = @($Candidati | Where-Object { (& $GetNome $_) -eq $ricerca })
+        if ($esatti.Count -eq 1) {
+            $selezionato = $esatti[0]
+        }
+        else {
+            $pattern = "*$([System.Management.Automation.WildcardPattern]::Escape($ricerca))*"
+            $corrispondenze = @($Candidati | Where-Object { (& $GetNome $_) -like $pattern })
+
+            if ($corrispondenze.Count -eq 0) {
+                Write-Host "[NOT FOUND] Nessuna corrispondenza per '$ricerca'. Riprovare." -ForegroundColor Yellow
+                continue
+            }
+
+            if ($corrispondenze.Count -eq 1) {
+                $selezionato = $corrispondenze[0]
+            }
+            else {
+                Write-Host "Trovate $($corrispondenze.Count) corrispondenze per '$ricerca':"
+                $righeGriglia = @()
+                for ($i = 0; $i -lt $corrispondenze.Count; $i++) {
+                    $candidato = $corrispondenze[$i]
+                    $nome = & $GetNome $candidato
+                    $dettaglio = & $GetDettaglio $candidato
+                    Write-Host "  [$($i + 1)] $nome - $dettaglio"
+                    $righeGriglia += [pscustomobject]@{
+                        Numero = $i + 1
+                        Nome = $nome
+                        Dettaglio = $dettaglio
+                    }
+                }
+
+                $scelta = Read-Host "Selezionare il numero$(if (Get-Command Out-GridView -ErrorAction SilentlyContinue) { ', G per finestra grafica' }) (0 per annullare)"
+                if (Test-Annulla -Valore $scelta) { return $null }
+
+                if ($scelta.Trim().ToUpper() -eq 'G' -and (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
+                    $rigaScelta = $righeGriglia | Out-GridView -Title "Selezionare: $Prompt" -OutputMode Single
+                    if ($null -eq $rigaScelta) { return $null }
+                    $selezionato = $corrispondenze[[int]$rigaScelta.Numero - 1]
+                }
+                else {
+                    $indice = 0
+                    if (-not ([int]::TryParse($scelta, [ref]$indice)) -or $indice -lt 1 -or $indice -gt $corrispondenze.Count) {
+                        Write-Host "Selezione non valida." -ForegroundColor Yellow
+                        continue
+                    }
+                    $selezionato = $corrispondenze[$indice - 1]
+                }
+            }
+        }
+
+        $nomeScelto = & $GetNome $selezionato
+        $dettaglioScelto = & $GetDettaglio $selezionato
+        Write-Host "Selezionato: $nomeScelto - $dettaglioScelto"
+        if (Read-ConfermaSiNo -Prompt "Confermare questa selezione?") { return $selezionato }
+    }
 }
 
 function Show-OUTree {
@@ -402,14 +512,32 @@ function Show-OUTree {
         return
     }
     Write-Host ""
-    Write-Host "Struttura OU disponibile (sotto $OURoot):" -ForegroundColor Cyan
+    Write-Host "Struttura OU disponibile:" -ForegroundColor Cyan
+
+    $figliPerPadre = @{}
     foreach ($ou in $tree) {
-        # Livello = numero di "OU=" nel DN meno quelli della root, usato per l'indentazione
-        $livello = ([regex]::Matches($ou.DistinguishedName, 'OU=')).Count - ([regex]::Matches($OURoot, 'OU=')).Count
-        if ($livello -lt 0) { $livello = 0 }
-        $indent = '  ' * ($livello + 1)
-        Write-Host "$indent- $($ou.Name)"
+        if ($ou.DistinguishedName -eq $OURoot) { continue }
+        $padre = Get-ParentDistinguishedName -DistinguishedName $ou.DistinguishedName
+        $chiavePadre = $padre.ToLowerInvariant()
+        if (-not $figliPerPadre.ContainsKey($chiavePadre)) { $figliPerPadre[$chiavePadre] = @() }
+        $figliPerPadre[$chiavePadre] += $ou
     }
+
+    function Show-OUFiglie {
+        param([string]$DNPadre, [int]$Livello)
+        $chiavePadre = $DNPadre.ToLowerInvariant()
+        if (-not $figliPerPadre.ContainsKey($chiavePadre)) { return }
+        foreach ($figlia in ($figliPerPadre[$chiavePadre] | Sort-Object Name, DistinguishedName)) {
+            $indent = '  ' * $Livello
+            Write-Host "$indent- $($figlia.Name)"
+            Show-OUFiglie -DNPadre $figlia.DistinguishedName -Livello ($Livello + 1)
+        }
+    }
+
+    $rootVisualizzata = $tree | Where-Object { $_.DistinguishedName -eq $OURoot } | Select-Object -First 1
+    if ($rootVisualizzata) { Write-Host "- $($rootVisualizzata.Name)" }
+    else { Write-Host "- $OURoot" }
+    Show-OUFiglie -DNPadre $OURoot -Livello 1
     Write-Host ""
 }
 
@@ -420,50 +548,12 @@ function Select-OUByName {
         [switch]$ForceRefresh
     )
     Show-OUTree -ForceRefresh:$ForceRefresh
-    while ($true) {
-        $nome = Read-Host -Prompt "$Prompt (0 per annullare)"
-        if (Test-Annulla -Valore $nome) { return $null }
-        if ([string]::IsNullOrWhiteSpace($nome)) {
-            Write-Host "  -> Campo obbligatorio, non puo' essere vuoto." -ForegroundColor Yellow
-            continue
-        }
-
-        $tree = Get-OUTree
-        $match = $tree | Where-Object { $_.Name -eq $nome }
-
-        if (-not $match) {
-            Write-Host "[NOT FOUND] Nessuna OU con nome esatto '$nome' trovata. Riprovare." -ForegroundColor Yellow
-            continue
-        }
-
-        if ($match.Count -gt 1) {
-            Write-Host "Trovate $($match.Count) OU corrispondenti:"
-            for ($i = 0; $i -lt $match.Count; $i++) {
-                Write-Host "  [$($i+1)] $($match[$i].DistinguishedName)"
-            }
-            $sceltaNum = Read-Host "Selezionare il numero (0 per annullare)"
-            if (Test-Annulla -Valore $sceltaNum) { return $null }
-            $idx = 0
-            if ([int]::TryParse($sceltaNum, [ref]$idx) -and $idx -ge 1 -and $idx -le $match.Count) {
-                $ouScelta = $match[$idx - 1]
-            }
-            else {
-                Write-Host "Selezione non valida." -ForegroundColor Yellow
-                continue
-            }
-        }
-        else {
-            $ouScelta = $match
-        }
-
-        Write-Host "Trovata: $($ouScelta.DistinguishedName)"
-        if (Read-ConfermaSiNo -Prompt "Confermare questa OU?") {
-            return $ouScelta.DistinguishedName
-        }
-        else {
-            continue
-        }
-    }
+    $tree = Get-OUTree
+    $ouScelta = Select-CandidatoAssistito -Candidati $tree -Prompt $Prompt `
+        -GetNome { param($ou) $ou.Name } `
+        -GetDettaglio { param($ou) $ou.DistinguishedName }
+    if ($null -eq $ouScelta) { return $null }
+    return $ouScelta.DistinguishedName
 }
 #endregion
 
@@ -1005,6 +1095,7 @@ Cosa si desidera fare?
   1) Cercare/analizzare una OU esistente
   2) Creare una nuova OU
   3) Spostare una OU
+  4) Collegare/rimuovere una GPO a/da una OU
   0) Torna al menu principale
 "@
     Write-Host $menuIniziale
@@ -1014,6 +1105,7 @@ Cosa si desidera fare?
         '1' { Invoke-AnalisiOU }
         '2' { Invoke-CreaOU }
         '3' { Invoke-SpostaOUStandalone }
+        '4' { Invoke-LinkPolicyOU }
         '0' { return }
         default { Write-Host "Opzione non valida." -ForegroundColor Yellow; Read-ReturnPause }
     }
@@ -1052,24 +1144,6 @@ function Invoke-AnalisiOU {
     Write-Host "GPO collegate     : $(if ($gpoLinks) { $gpoLinks.Count } else { 0 })"
     Write-Host ""
 
-    $menu = @"
-Cosa si desidera fare?
-  1) Collegare/rimuovere policy
-  2) Delegare permessi (NON IMPLEMENTATO)
-  0) Torna al menu principale
-"@
-    Write-Host $menu
-    $scelta = Read-Host "Selezionare un'opzione"
-
-    switch ($scelta) {
-        '1' { Invoke-LinkPolicyOU -OU $ou }
-        '2' {
-            Write-Host "[TODO] Funzionalità 'Delega permessi su OU' non ancora implementata." -ForegroundColor Yellow
-            Write-SessionLog -Testo "TENTATIVO: delega permessi su OU '$($ou.DistinguishedName)' -> funzionalità non implementata (TODO: dsacls.exe)."
-        }
-        '0' { return }
-        default { Write-Host "Opzione non valida." -ForegroundColor Yellow }
-    }
     Read-ReturnPause
 }
 
@@ -1141,12 +1215,35 @@ function Invoke-SpostaOU {
     param($OU)
     Write-LogScelta -Percorso "2.3" -Descrizione "Spostamento OU"
 
-    Write-Host "OU da spostare: $($OU.DistinguishedName)"
+    $dnOrigine = $OU.DistinguishedName
+    if ($dnOrigine -eq $OURoot) {
+        Write-Host "[ERRORE] La OU root '$OURoot' non puo' essere spostata." -ForegroundColor Red
+        Write-SessionLog -Testo "VERIFICA: tentativo di spostare la OU root '$OURoot' bloccato."
+        return
+    }
+
+    Write-Host "OU da spostare: $dnOrigine"
     $destinazione = Select-OUByName -Prompt "Selezionare la OU padre di destinazione"
     if ($null -eq $destinazione) { return }
     Write-LogInput -Etichetta "OU destinazione" -Valore $destinazione
 
-    Write-Host "OU attuale: $($OU.DistinguishedName)"
+    if ($destinazione -eq $dnOrigine -or $destinazione.EndsWith(",$dnOrigine", [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "[ERRORE] Non e' possibile spostare una OU dentro se stessa o una sua discendente." -ForegroundColor Red
+        Write-SessionLog -Testo "VERIFICA: destinazione '$destinazione' non valida per spostamento OU '$dnOrigine' (self/descendant)."
+        return
+    }
+
+    try {
+        $OU = Get-ADOrganizationalUnit -Identity $dnOrigine -Server $DCServer -Credential $script:ADCredential `
+            -Properties ProtectedFromAccidentalDeletion -ErrorAction Stop
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile rileggere la OU da spostare: $($_.Exception.Message)" -ForegroundColor Red
+        Write-LogErrore -Contesto "Spostamento OU - rilettura origine" -Messaggio $_.Exception.Message
+        return
+    }
+
+    Write-Host "OU attuale: $dnOrigine"
     Write-Host "Destinazione: $destinazione"
     $motivazione = Read-MotivazioneOperazione
     Write-LogInput -Etichetta "Motivazione" -Valore $motivazione
@@ -1156,46 +1253,99 @@ function Invoke-SpostaOU {
         return
     }
 
-    $statoPrima = $OU.DistinguishedName
+    $protezioneDisabilitata = $false
+    $spostamentoRiuscito = $false
+    $erroreSpostamento = $null
+    $erroreRipristinoProtezione = $null
+    $statoPrima = $dnOrigine
     try {
-        Move-ADObject -Identity $OU.DistinguishedName -TargetPath $destinazione -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
-        Reset-OUTreeCache
-        Show-Esito -Successo $true -MessaggioOk "OU spostata."
-        Write-LogModifica -Azione "Spostamento OU" -Target $OU.Name -StatoPrima $statoPrima `
-            -StatoDopo "OU=$($OU.Name),$destinazione" -Motivazione $motivazione -Esito "RIUSCITA"
+        if ($OU.ProtectedFromAccidentalDeletion) {
+            Write-Host "[AVVISO] La OU e' protetta dall'eliminazione accidentale." -ForegroundColor Yellow
+            if (-not (Read-ConfermaSiNo -Prompt "Disabilitare temporaneamente la protezione per eseguire lo spostamento?")) {
+                Write-SessionLog -Testo "OPERAZIONE ANNULLATA dal tecnico (disabilitazione temporanea protezione OU $($OU.Name))"
+                return
+            }
+            Set-ADOrganizationalUnit -Identity $dnOrigine -ProtectedFromAccidentalDeletion $false -Server $DCServer `
+                -Credential $script:ADCredential -ErrorAction Stop
+            $protezioneDisabilitata = $true
+            Write-SessionLog -Testo "STEP: protezione da eliminazione accidentale disabilitata temporaneamente per OU '$dnOrigine'."
+        }
+
+        Move-ADObject -Identity $dnOrigine -TargetPath $destinazione -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
+        $spostamentoRiuscito = $true
     }
     catch {
-        Show-Esito -Successo $false -MessaggioKo "Errore: $($_.Exception.Message)"
-        Write-Host "" 
-        Write-Host "Nota: 'Access is denied' su Move-ADObject e' quasi sempre un problema di permessi AD," -ForegroundColor Yellow
-        Write-Host "non un bug dello script. Servono i permessi 'Delete Object' sulla OU di origine e" -ForegroundColor Yellow
-        Write-Host "'Create Object' sulla OU di destinazione, delegati sull'utenza tecnica." -ForegroundColor Yellow
-        Write-LogModifica -Azione "Spostamento OU" -Target $OU.Name -StatoPrima $statoPrima `
-            -StatoDopo "N/D (errore)" -Motivazione $motivazione -Esito "FALLITA: $($_.Exception.Message)"
+        $erroreSpostamento = $_.Exception.Message
     }
+    finally {
+        if ($protezioneDisabilitata) {
+            try {
+                $dnDaProteggere = if ($spostamentoRiuscito) { "OU=$($OU.Name),$destinazione" } else { $dnOrigine }
+                Set-ADOrganizationalUnit -Identity $dnDaProteggere -ProtectedFromAccidentalDeletion $true -Server $DCServer `
+                    -Credential $script:ADCredential -ErrorAction Stop
+                Write-SessionLog -Testo "STEP: protezione da eliminazione accidentale ripristinata per OU '$dnDaProteggere'."
+            }
+            catch {
+                $erroreRipristinoProtezione = $_.Exception.Message
+            }
+        }
+    }
+
+    if (-not $spostamentoRiuscito) {
+        Show-Esito -Successo $false -MessaggioKo "Errore durante lo spostamento: $erroreSpostamento"
+        if ($erroreSpostamento -match 'access.*denied|accesso.*negato') {
+            Write-Host "Nota: servono 'Delete Child' o 'Delete Object' sull'OU di origine e 'Create Child'" -ForegroundColor Yellow
+            Write-Host "sulla OU di destinazione. Se la protezione era attiva, servono anche permessi per modificarla." -ForegroundColor Yellow
+        }
+        Write-LogModifica -Azione "Spostamento OU" -Target $OU.Name -StatoPrima $statoPrima `
+            -StatoDopo "N/D (errore)" -Motivazione $motivazione -Esito "FALLITA: $erroreSpostamento"
+        return
+    }
+
+    Reset-OUTreeCache
+    if ($erroreRipristinoProtezione) {
+        Show-Esito -Successo $false -MessaggioKo "OU spostata, ma la protezione non e' stata ripristinata: $erroreRipristinoProtezione"
+        Write-LogModifica -Azione "Spostamento OU" -Target $OU.Name -StatoPrima $statoPrima `
+            -StatoDopo "OU=$($OU.Name),$destinazione; protezione NON ripristinata" -Motivazione $motivazione `
+            -Esito "RIUSCITA CON AVVISO: $erroreRipristinoProtezione"
+        return
+    }
+
+    Show-Esito -Successo $true -MessaggioOk "OU spostata."
+    Write-LogModifica -Azione "Spostamento OU" -Target $OU.Name -StatoPrima $statoPrima `
+        -StatoDopo "OU=$($OU.Name),$destinazione" -Motivazione $motivazione -Esito "RIUSCITA"
 }
 
 function Invoke-LinkPolicyOU {
-    param($OU)
-    Write-LogScelta -Percorso "2.1.1" -Descrizione "Collega/rimuovi policy su OU"
+    Write-LogScelta -Percorso "2.4" -Descrizione "Collega/rimuovi policy su OU"
 
     if (-not $script:GPOModuleAvailable) {
         Write-Host "[ERRORE] Modulo GroupPolicy non disponibile." -ForegroundColor Red
         return
     }
 
+    $dnOU = Select-OUByName -Prompt "Selezionare la OU su cui operare il collegamento"
+    if ($null -eq $dnOU) { return }
+    try {
+        $OU = Get-ADOrganizationalUnit -Identity $dnOU -Server $DCServer -Credential $script:ADCredential `
+            -Properties LinkedGroupPolicyObjects -ErrorAction Stop
+    }
+    catch {
+        Write-Host "[ERRORE] OU inesistente o non raggiungibile: $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
     Write-Host "Policy attualmente collegate: $(($OU.LinkedGroupPolicyObjects | Measure-Object).Count)"
     Write-Host "1) Collegare una GPO   2) Rimuovere una GPO"
     $azione = Read-Host "Selezionare un'opzione"
-    $nomeGPO = Read-InputObbligatorio -Prompt "Nome della GPO"
-    Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
-
-    try { $gpo = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop }
-    catch {
-        Write-Host "[ERRORE] GPO inesistente." -ForegroundColor Red
-        Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Operazione interrotta."
+    if ($azione -ne '1' -and $azione -ne '2') {
+        Write-Host "Opzione non valida." -ForegroundColor Yellow
         return
     }
+    $gpo = Select-GPOByName -Prompt "Inserire nome GPO"
+    if ($null -eq $gpo) { return }
+    $nomeGPO = $gpo.DisplayName
+    Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
 
     $azioneTesto = if ($azione -eq '1') { 'COLLEGAMENTO' } else { 'RIMOZIONE LINK' }
     Write-Host "Situazione prevista: $azioneTesto GPO '$nomeGPO' su OU '$($OU.DistinguishedName)'"
@@ -1229,6 +1379,21 @@ function Invoke-LinkPolicyOU {
 
 #region ============================ 3. GESTIONE GPO ============================
 
+function Select-GPOByName {
+    param([string]$Prompt = "Inserire nome GPO")
+    try {
+        $gpoDisponibili = @(Get-GPO -All -Server $DCServer -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare le GPO: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $gpoDisponibili -Prompt $Prompt `
+        -GetNome { param($gpo) $gpo.DisplayName } `
+        -GetDettaglio { param($gpo) "ID: $($gpo.Id)" }
+}
+
 function Menu-OperaGPO {
     Write-LogScelta -Percorso "3" -Descrizione "Operare su policy (GPO) - menu"
 
@@ -1242,7 +1407,11 @@ function Menu-OperaGPO {
 Cosa si desidera fare?
   1) Cercare/analizzare una GPO esistente
   2) Creare una nuova GPO
-  3) Visualizzare le GPO collegate a una OU
+  3) Link/Unlink GPO su OU
+  4) Visualizzare le GPO collegate a una OU
+  5) Modificare ordine applicazione GPO su una OU
+  6) Eseguire backup GPO
+  7) Forzare aggiornamento GPO (gpupdate remoto)
   0) Torna al menu principale
 "@
     Write-Host $menuIniziale
@@ -1251,7 +1420,11 @@ Cosa si desidera fare?
     switch ($sceltaIniziale) {
         '1' { Invoke-AnalisiGPO }
         '2' { Invoke-CreaGPO }
-        '3' { Invoke-VisualizzaGPOPerOU }
+        '3' { Invoke-LinkUnlinkGPO }
+        '4' { Invoke-VisualizzaGPOPerOU }
+        '5' { Invoke-OrdineGPO }
+        '6' { Invoke-BackupGPO }
+        '7' { Invoke-ForzaGPUpdate }
         '0' { return }
         default { Write-Host "Opzione non valida." -ForegroundColor Yellow; Read-ReturnPause }
     }
@@ -1260,12 +1433,10 @@ Cosa si desidera fare?
 function Invoke-AnalisiGPO {
     Write-LogScelta -Percorso "3.1" -Descrizione "Analisi GPO esistente"
 
-    $nomeGPO = Read-InputAnnullabile -Prompt "Inserire nome GPO"
-    if ($null -eq $nomeGPO) { return }
+    $gpo = Select-GPOByName -Prompt "Inserire nome GPO da analizzare"
+    if ($null -eq $gpo) { return }
+    $nomeGPO = $gpo.DisplayName
     Write-LogInput -Etichetta "Nome GPO ricercata" -Valore $nomeGPO
-
-    $gpo = $null
-    try { $gpo = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop } catch { $gpo = $null }
 
     if (-not $gpo) {
         Write-Host "[NOT FOUND] GPO inesistente." -ForegroundColor Yellow
@@ -1284,25 +1455,6 @@ function Invoke-AnalisiGPO {
     Write-Host "Modificata  : $($gpo.ModificationTime)"
     Write-Host ""
 
-    $menu = @"
-Cosa si desidera fare?
-  1) Link/Unlink su OU
-  2) Modificare ordine applicazione GPO su una OU
-  3) Eseguire backup GPO
-  4) Forzare aggiornamento GPO (gpupdate remoto)
-  0) Torna al menu principale
-"@
-    Write-Host $menu
-    $scelta = Read-Host "Selezionare un'opzione"
-
-    switch ($scelta) {
-        '1' { Invoke-LinkUnlinkGPO -GPO $gpo }
-        '2' { Invoke-OrdineGPO }
-        '3' { Invoke-BackupGPO -GPO $gpo }
-        '4' { Invoke-ForzaGPUpdate }
-        '0' { return }
-        default { Write-Host "Opzione non valida." -ForegroundColor Yellow }
-    }
     Read-ReturnPause
 }
 
@@ -1375,7 +1527,12 @@ function Invoke-CreaGPO {
 
 function Invoke-LinkUnlinkGPO {
     param($GPO)
-    Write-LogScelta -Percorso "3.1.1" -Descrizione "Link/Unlink GPO su OU"
+    Write-LogScelta -Percorso "3.3" -Descrizione "Link/Unlink GPO su OU"
+
+    if ($null -eq $GPO) {
+        $GPO = Select-GPOByName -Prompt "Inserire nome GPO"
+        if ($null -eq $GPO) { return }
+    }
 
     $ouTarget = Select-OUByName -Prompt "Selezionare la OU su cui operare il link"
     if ($null -eq $ouTarget) { return }
@@ -1383,6 +1540,10 @@ function Invoke-LinkUnlinkGPO {
 
     Write-Host "1) Collegare   2) Rimuovere link"
     $azione = Read-Host "Selezionare un'opzione"
+    if ($azione -ne '1' -and $azione -ne '2') {
+        Write-Host "Opzione non valida." -ForegroundColor Yellow
+        return
+    }
     $azioneTesto = if ($azione -eq '1') { 'COLLEGAMENTO' } else { 'RIMOZIONE LINK' }
 
     Write-Host "Previsto: $azioneTesto GPO '$($GPO.DisplayName)' su OU '$ouTarget'"
@@ -1413,7 +1574,7 @@ function Invoke-LinkUnlinkGPO {
 }
 
 function Invoke-OrdineGPO {
-    Write-LogScelta -Percorso "3.1.2" -Descrizione "Modifica ordine applicazione GPO"
+    Write-LogScelta -Percorso "3.5" -Descrizione "Modifica ordine applicazione GPO"
 
     $ouTarget = Select-OUByName -Prompt "Selezionare la OU interessata"
     if ($null -eq $ouTarget) { return }
@@ -1431,7 +1592,11 @@ function Invoke-OrdineGPO {
     Write-Host "Ordine attuale (dal più prioritario al meno prioritario, Order=1 e' il piu' prioritario):"
     $links.GpoLinks | Sort-Object Order | ForEach-Object { Write-Host "  [$($_.Order)] $($_.DisplayName)" }
 
-    $nomeGPOSpost = Read-InputObbligatorio -Prompt "Nome della GPO di cui cambiare l'ordine"
+    $gpoDaRiordinare = Select-CandidatoAssistito -Candidati @($links.GpoLinks) -Prompt "Inserire nome GPO di cui cambiare l'ordine" `
+        -GetNome { param($link) $link.DisplayName } `
+        -GetDettaglio { param($link) "Order: $($link.Order)" }
+    if ($null -eq $gpoDaRiordinare) { return }
+    $nomeGPOSpost = $gpoDaRiordinare.DisplayName
     $nuovoOrdine = Read-InputObbligatorio -Prompt "Nuovo valore Order (numero intero, 1 = massima priorità)"
     Write-LogInput -Etichetta "GPO / Nuovo ordine" -Valore "$nomeGPOSpost / $nuovoOrdine"
 
@@ -1460,7 +1625,12 @@ function Invoke-OrdineGPO {
 
 function Invoke-BackupGPO {
     param($GPO)
-    Write-LogScelta -Percorso "3.1.3" -Descrizione "Backup GPO"
+    Write-LogScelta -Percorso "3.6" -Descrizione "Backup GPO"
+
+    if ($null -eq $GPO) {
+        $GPO = Select-GPOByName -Prompt "Inserire nome GPO per il backup"
+        if ($null -eq $GPO) { return }
+    }
 
     $percorso = Read-InputObbligatorio -Prompt "Percorso di destinazione per il backup"
     Write-LogInput -Etichetta "Percorso backup" -Valore $percorso
@@ -1494,7 +1664,7 @@ function Invoke-BackupGPO {
 }
 
 function Invoke-ForzaGPUpdate {
-    Write-LogScelta -Percorso "3.1.4" -Descrizione "Forzare aggiornamento GPO"
+    Write-LogScelta -Percorso "3.7" -Descrizione "Forzare aggiornamento GPO"
 
     $computerTarget = Read-InputObbligatorio -Prompt "Nome computer o OU interessata"
     Write-LogInput -Etichetta "Target aggiornamento" -Valore $computerTarget
@@ -1524,6 +1694,22 @@ function Invoke-ForzaGPUpdate {
 #endregion
 
 #region ============================ 4. GESTIONE GRUPPI ============================
+
+function Select-ADGroupByName {
+    param([string]$Prompt = "Inserire nome gruppo")
+    try {
+        $gruppiDisponibili = @(Get-ADGroup -Filter * -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential `
+            -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare i gruppi: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $gruppiDisponibili -Prompt $Prompt `
+        -GetNome { param($gruppo) $gruppo.Name } `
+        -GetDettaglio { param($gruppo) $gruppo.DistinguishedName }
+}
 
 function Menu-OperaGruppi {
     Write-LogScelta -Percorso "4" -Descrizione "Operare su gruppi"
@@ -1564,12 +1750,8 @@ function Invoke-AnalizzaGruppi {
     $trovati = @()
     $nonTrovati = @()
     foreach ($n in $nomi) {
-        try {
-            $g = Get-ADGroup -Filter "Name -eq '$n'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential `
-                -Properties Description, whenCreated, whenChanged -ErrorAction Stop
-            if ($g) { $trovati += $g } else { $nonTrovati += $n }
-        }
-        catch { $nonTrovati += $n }
+        $g = Select-ADGroupByName -Prompt "Cercare gruppo '$n'"
+        if ($g) { $trovati += $g } else { $nonTrovati += $n }
     }
 
     if ($trovati.Count -eq 0) {
@@ -1660,18 +1842,10 @@ function Invoke-CreaGruppo {
 function Invoke-ModificaGruppo {
     Write-LogScelta -Percorso "4.3" -Descrizione "Modifica dati gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     Write-Host "Dati attuali: Description=$($g.Description), Scope=$($g.GroupScope), Category=$($g.GroupCategory)"
     $nuovaDescrizione = Read-Host "Nuova descrizione (ENTER per non modificare)"
@@ -1707,18 +1881,10 @@ function Invoke-ModificaGruppo {
 function Invoke-ModificaMembriGruppo {
     Write-LogScelta -Percorso "4.4" -Descrizione "Modifica membri gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     $membriAttuali = (Get-ADGroupMember -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name
     Write-Host "Membri attuali: $($membriAttuali -join ', ')"
@@ -1782,18 +1948,10 @@ function Invoke-ModificaMembriGruppo {
 function Invoke-SpostaGruppo {
     Write-LogScelta -Percorso "4.5" -Descrizione "Spostamento gruppo di OU"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     Write-Host "OU attuale: $($g.DistinguishedName)"
     $ouDest = Select-OUByName -Prompt "Selezionare la OU di destinazione"
@@ -1827,18 +1985,10 @@ function Invoke-SpostaGruppo {
 function Invoke-EliminaGruppo {
     Write-LogScelta -Percorso "4.6" -Descrizione "Eliminazione gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties Description -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     $membri = (Get-ADGroupMember -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name
     Write-Host "ATTENZIONE: eliminazione del gruppo '$nome'"
@@ -1900,11 +2050,28 @@ Cosa si desidera fare?
 }
 
 function Get-TaskCimSession {
+    $isIndirizzoIP = $false
+    $indirizzoIP = $null
+    $isIndirizzoIP = [System.Net.IPAddress]::TryParse($DCServer, [ref]$indirizzoIP)
+
     try {
+        if ($isIndirizzoIP) {
+            # WinRM verso un IP richiede TrustedHosts; DCOM evita tale dipendenza.
+            $opzioni = New-CimSessionOption -Protocol Dcom
+            return New-CimSession -ComputerName $DCServer -Credential $script:ADCredential -SessionOption $opzioni -ErrorAction Stop
+        }
         return New-CimSession -ComputerName $DCServer -Credential $script:ADCredential -ErrorAction Stop
     }
     catch {
-        Write-Host "[ERRORE] Impossibile stabilire sessione CIM verso $DCServer $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[ERRORE] Impossibile stabilire sessione CIM verso $DCServer: $($_.Exception.Message)" -ForegroundColor Red
+        if ($isIndirizzoIP) {
+            Write-Host "Per un indirizzo IP lo script usa DCOM: verificare RPC/DCOM, firewall e autorizzazioni" -ForegroundColor Yellow
+            Write-Host "dell'utenza tecnica sul Domain Controller. In alternativa usare il nome DNS del DC con WinRM configurato." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "Verificare che WinRM sia abilitato sul DC e che il nome DNS sia risolvibile." -ForegroundColor Yellow
+            Write-Host "Se si usa un IP con WinRM, aggiungerlo a TrustedHosts oppure usare il nome DNS del DC." -ForegroundColor Yellow
+        }
         return $null
     }
 }
@@ -1953,19 +2120,30 @@ function Find-TaskByName {
     catch { return $null }
 }
 
+function Select-TaskByName {
+    param($Session, [string]$Prompt = "Inserire nome del task")
+    try {
+        $taskDisponibili = @(Get-ScheduledTask -CimSession $Session -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare i task: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $taskDisponibili -Prompt $Prompt `
+        -GetNome { param($task) $task.TaskName } `
+        -GetDettaglio { param($task) $task.TaskPath }
+}
+
 function Invoke-VisualizzaDettaglioTask {
     Write-LogScelta -Percorso "5.2" -Descrizione "Visualizza dettaglio task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task dettaglio)."
         Remove-CimSession $session
         return
     }
@@ -1997,15 +2175,12 @@ function Invoke-VisualizzaDettaglioTask {
 function Invoke-AbilitaTask {
     Write-LogScelta -Percorso "5.3" -Descrizione "Abilita task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task abilitazione)."
         Remove-CimSession $session
         return
     }
@@ -2043,15 +2218,12 @@ function Invoke-AbilitaTask {
 function Invoke-DisabilitaTask {
     Write-LogScelta -Percorso "5.4" -Descrizione "Disabilita task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task disabilitazione)."
         Remove-CimSession $session
         return
     }
@@ -2089,15 +2261,12 @@ function Invoke-DisabilitaTask {
 function Invoke-AvviaTask {
     Write-LogScelta -Percorso "5.5" -Descrizione "Avvia manualmente task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task avvio)."
         Remove-CimSession $session
         return
     }
