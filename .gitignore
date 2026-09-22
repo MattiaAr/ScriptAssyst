@@ -1,0 +1,10 @@
+cred_tecnico.xml
+*.xml
+*.pfx
+*.key
+*.pem
+Logs/
+*.log
+*.txt
+*.tmp
+*.bak
