@@ -2149,7 +2149,7 @@ Cosa si desidera fare?
     Write-Host $menu
     return Read-Host "Selezionare un'opzione"
 }
-
+ 
 $continua = $true
 while ($continua) {
     $scelta = Show-MenuPrincipale
