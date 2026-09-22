@@ -471,50 +471,12 @@ function Select-OUByName {
         [switch]$ForceRefresh
     )
     Show-OUTree -ForceRefresh:$ForceRefresh
-    while ($true) {
-        $nome = Read-Host -Prompt "$Prompt (0 per annullare)"
-        if (Test-Annulla -Valore $nome) { return $null }
-        if ([string]::IsNullOrWhiteSpace($nome)) {
-            Write-Host "  -> Campo obbligatorio, non puo' essere vuoto." -ForegroundColor Yellow
-            continue
-        }
-
-        $tree = Get-OUTree
-        $match = $tree | Where-Object { $_.Name -eq $nome }
-
-        if (-not $match) {
-            Write-Host "[NOT FOUND] Nessuna OU con nome esatto '$nome' trovata. Riprovare." -ForegroundColor Yellow
-            continue
-        }
-
-        if ($match.Count -gt 1) {
-            Write-Host "Trovate $($match.Count) OU corrispondenti:"
-            for ($i = 0; $i -lt $match.Count; $i++) {
-                Write-Host "  [$($i+1)] $($match[$i].DistinguishedName)"
-            }
-            $sceltaNum = Read-Host "Selezionare il numero (0 per annullare)"
-            if (Test-Annulla -Valore $sceltaNum) { return $null }
-            $idx = 0
-            if ([int]::TryParse($sceltaNum, [ref]$idx) -and $idx -ge 1 -and $idx -le $match.Count) {
-                $ouScelta = $match[$idx - 1]
-            }
-            else {
-                Write-Host "Selezione non valida." -ForegroundColor Yellow
-                continue
-            }
-        }
-        else {
-            $ouScelta = $match
-        }
-
-        Write-Host "Trovata: $($ouScelta.DistinguishedName)"
-        if (Read-ConfermaSiNo -Prompt "Confermare questa OU?") {
-            return $ouScelta.DistinguishedName
-        }
-        else {
-            continue
-        }
-    }
+    $tree = Get-OUTree
+    $ouScelta = Select-CandidatoAssistito -Candidati $tree -Prompt $Prompt `
+        -GetNome { param($ou) $ou.Name } `
+        -GetDettaglio { param($ou) $ou.DistinguishedName }
+    if ($null -eq $ouScelta) { return $null }
+    return $ouScelta.DistinguishedName
 }
 #endregion
 
@@ -1312,6 +1274,10 @@ function Invoke-LinkPolicyOU {
         Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Operazione interrotta."
         return
     }
+    $gpo = Select-GPOByName -Prompt "Inserire nome GPO"
+    if ($null -eq $gpo) { return }
+    $nomeGPO = $gpo.DisplayName
+    Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
 
     $azioneTesto = if ($azione -eq '1') { 'COLLEGAMENTO' } else { 'RIMOZIONE LINK' }
     Write-Host "Situazione prevista: $azioneTesto GPO '$nomeGPO' su OU '$($OU.DistinguishedName)'"
@@ -1344,6 +1310,21 @@ function Invoke-LinkPolicyOU {
 #endregion
 
 #region ============================ 3. GESTIONE GPO ============================
+
+function Select-GPOByName {
+    param([string]$Prompt = "Inserire nome GPO")
+    try {
+        $gpoDisponibili = @(Get-GPO -All -Server $DCServer -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare le GPO: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $gpoDisponibili -Prompt $Prompt `
+        -GetNome { param($gpo) $gpo.DisplayName } `
+        -GetDettaglio { param($gpo) "ID: $($gpo.Id)" }
+}
 
 function Menu-OperaGPO {
     Write-LogScelta -Percorso "3" -Descrizione "Operare su policy (GPO) - menu"
@@ -1384,12 +1365,10 @@ Cosa si desidera fare?
 function Invoke-AnalisiGPO {
     Write-LogScelta -Percorso "3.1" -Descrizione "Analisi GPO esistente"
 
-    $nomeGPO = Read-InputAnnullabile -Prompt "Inserire nome GPO"
-    if ($null -eq $nomeGPO) { return }
+    $gpo = Select-GPOByName -Prompt "Inserire nome GPO da analizzare"
+    if ($null -eq $gpo) { return }
+    $nomeGPO = $gpo.DisplayName
     Write-LogInput -Etichetta "Nome GPO ricercata" -Valore $nomeGPO
-
-    $gpo = $null
-    try { $gpo = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop } catch { $gpo = $null }
 
     if (-not $gpo) {
         Write-Host "[NOT FOUND] GPO inesistente." -ForegroundColor Yellow
@@ -1551,7 +1530,11 @@ function Invoke-OrdineGPO {
     Write-Host "Ordine attuale (dal più prioritario al meno prioritario, Order=1 e' il piu' prioritario):"
     $links.GpoLinks | Sort-Object Order | ForEach-Object { Write-Host "  [$($_.Order)] $($_.DisplayName)" }
 
-    $nomeGPOSpost = Read-InputObbligatorio -Prompt "Nome della GPO di cui cambiare l'ordine"
+    $gpoDaRiordinare = Select-CandidatoAssistito -Candidati @($links.GpoLinks) -Prompt "Inserire nome GPO di cui cambiare l'ordine" `
+        -GetNome { param($link) $link.DisplayName } `
+        -GetDettaglio { param($link) "Order: $($link.Order)" }
+    if ($null -eq $gpoDaRiordinare) { return }
+    $nomeGPOSpost = $gpoDaRiordinare.DisplayName
     $nuovoOrdine = Read-InputObbligatorio -Prompt "Nuovo valore Order (numero intero, 1 = massima priorità)"
     Write-LogInput -Etichetta "GPO / Nuovo ordine" -Valore "$nomeGPOSpost / $nuovoOrdine"
 
@@ -1656,6 +1639,22 @@ function Invoke-ForzaGPUpdate {
 
 #region ============================ 4. GESTIONE GRUPPI ============================
 
+function Select-ADGroupByName {
+    param([string]$Prompt = "Inserire nome gruppo")
+    try {
+        $gruppiDisponibili = @(Get-ADGroup -Filter * -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential `
+            -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare i gruppi: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $gruppiDisponibili -Prompt $Prompt `
+        -GetNome { param($gruppo) $gruppo.Name } `
+        -GetDettaglio { param($gruppo) $gruppo.DistinguishedName }
+}
+
 function Menu-OperaGruppi {
     Write-LogScelta -Percorso "4" -Descrizione "Operare su gruppi"
 
@@ -1695,12 +1694,8 @@ function Invoke-AnalizzaGruppi {
     $trovati = @()
     $nonTrovati = @()
     foreach ($n in $nomi) {
-        try {
-            $g = Get-ADGroup -Filter "Name -eq '$n'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential `
-                -Properties Description, whenCreated, whenChanged -ErrorAction Stop
-            if ($g) { $trovati += $g } else { $nonTrovati += $n }
-        }
-        catch { $nonTrovati += $n }
+        $g = Select-ADGroupByName -Prompt "Cercare gruppo '$n'"
+        if ($g) { $trovati += $g } else { $nonTrovati += $n }
     }
 
     if ($trovati.Count -eq 0) {
@@ -1791,18 +1786,10 @@ function Invoke-CreaGruppo {
 function Invoke-ModificaGruppo {
     Write-LogScelta -Percorso "4.3" -Descrizione "Modifica dati gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     Write-Host "Dati attuali: Description=$($g.Description), Scope=$($g.GroupScope), Category=$($g.GroupCategory)"
     $nuovaDescrizione = Read-Host "Nuova descrizione (ENTER per non modificare)"
@@ -1838,18 +1825,10 @@ function Invoke-ModificaGruppo {
 function Invoke-ModificaMembriGruppo {
     Write-LogScelta -Percorso "4.4" -Descrizione "Modifica membri gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     $membriAttuali = (Get-ADGroupMember -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name
     Write-Host "Membri attuali: $($membriAttuali -join ', ')"
@@ -1913,18 +1892,10 @@ function Invoke-ModificaMembriGruppo {
 function Invoke-SpostaGruppo {
     Write-LogScelta -Percorso "4.5" -Descrizione "Spostamento gruppo di OU"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     Write-Host "OU attuale: $($g.DistinguishedName)"
     $ouDest = Select-OUByName -Prompt "Selezionare la OU di destinazione"
@@ -1958,18 +1929,10 @@ function Invoke-SpostaGruppo {
 function Invoke-EliminaGruppo {
     Write-LogScelta -Percorso "4.6" -Descrizione "Eliminazione gruppo"
 
-    $nome = Read-InputObbligatorio -Prompt "Nome del gruppo"
+    $g = Select-ADGroupByName -Prompt "Inserire nome del gruppo"
+    if ($null -eq $g) { return }
+    $nome = $g.Name
     Write-LogInput -Etichetta "Nome gruppo" -Valore $nome
-
-    $g = $null
-    try { $g = Get-ADGroup -Filter "Name -eq '$nome'" -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties Description -ErrorAction Stop } catch { $g = $null }
-    if ($g -is [array]) { $g = $g[0] }
-
-    if (-not $g) {
-        Write-Host "[NOT FOUND] Gruppo inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA GRUPPO '$nome': NON TROVATO"
-        return
-    }
 
     $membri = (Get-ADGroupMember -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name
     Write-Host "ATTENZIONE: eliminazione del gruppo '$nome'"
@@ -2101,19 +2064,30 @@ function Find-TaskByName {
     catch { return $null }
 }
 
+function Select-TaskByName {
+    param($Session, [string]$Prompt = "Inserire nome del task")
+    try {
+        $taskDisponibili = @(Get-ScheduledTask -CimSession $Session -ErrorAction Stop)
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare i task: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    return Select-CandidatoAssistito -Candidati $taskDisponibili -Prompt $Prompt `
+        -GetNome { param($task) $task.TaskName } `
+        -GetDettaglio { param($task) $task.TaskPath }
+}
+
 function Invoke-VisualizzaDettaglioTask {
     Write-LogScelta -Percorso "5.2" -Descrizione "Visualizza dettaglio task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task dettaglio)."
         Remove-CimSession $session
         return
     }
@@ -2145,15 +2119,12 @@ function Invoke-VisualizzaDettaglioTask {
 function Invoke-AbilitaTask {
     Write-LogScelta -Percorso "5.3" -Descrizione "Abilita task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task abilitazione)."
         Remove-CimSession $session
         return
     }
@@ -2191,15 +2162,12 @@ function Invoke-AbilitaTask {
 function Invoke-DisabilitaTask {
     Write-LogScelta -Percorso "5.4" -Descrizione "Disabilita task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task disabilitazione)."
         Remove-CimSession $session
         return
     }
@@ -2237,15 +2205,12 @@ function Invoke-DisabilitaTask {
 function Invoke-AvviaTask {
     Write-LogScelta -Percorso "5.5" -Descrizione "Avvia manualmente task"
 
-    $nomeTask = Read-InputObbligatorio -Prompt "Inserire nome del task"
-    Write-LogInput -Etichetta "Nome task" -Valore $nomeTask
-
     $session = Get-TaskCimSession
     if (-not $session) { return }
-    $task = Find-TaskByName -Nome $nomeTask -Session $session
+    $task = Select-TaskByName -Session $session
+    if ($task) { $nomeTask = $task.TaskName; Write-LogInput -Etichetta "Nome task" -Valore $nomeTask }
     if (-not $task) {
-        Write-Host "[NOT FOUND] Task inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA TASK '$nomeTask': NON TROVATO"
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA o non eseguibile (selezione task avvio)."
         Remove-CimSession $session
         return
     }
