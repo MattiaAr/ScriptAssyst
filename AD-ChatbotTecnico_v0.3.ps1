@@ -1096,7 +1096,14 @@ function Invoke-CreaOU {
 
     $ouPadre = Select-OUByName -Prompt "Selezionare la OU padre (dove verra' creata la nuova OU)"
     if ($null -eq $ouPadre) { return }
-    Write-LogInput -Etichetta "Nome nuova OU / OU padre" -Valore "$nomeNuova / $ouPadre"
+
+    $proteggiOU = Read-ConfermaSiNo -Prompt "Proteggere la nuova OU dall'eliminazione accidentale?"
+    if ($null -eq $proteggiOU) {
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA dal tecnico (scelta protezione nuova OU $nomeNuova)"
+        return
+    }
+    $statoProtezione = if ($proteggiOU) { 'Attiva' } else { 'Disattiva' }
+    Write-LogInput -Etichetta "Nome nuova OU / OU padre / protezione" -Valore "$nomeNuova / $ouPadre / $statoProtezione"
 
     $dnPrevisto = "OU=$nomeNuova,$ouPadre"
     $esiste = $null
@@ -1110,6 +1117,7 @@ function Invoke-CreaOU {
     }
 
     Write-Host "Riepilogo: verrà creata '$dnPrevisto'"
+    Write-Host "Protezione da eliminazione accidentale: $statoProtezione"
     $motivazione = Read-MotivazioneOperazione
     Write-LogInput -Etichetta "Motivazione" -Valore $motivazione
 
@@ -1120,10 +1128,11 @@ function Invoke-CreaOU {
     }
 
     try {
-        New-ADOrganizationalUnit -Name $nomeNuova -Path $ouPadre -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
+        New-ADOrganizationalUnit -Name $nomeNuova -Path $ouPadre -ProtectedFromAccidentalDeletion $proteggiOU `
+            -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
         Reset-OUTreeCache
         Show-Esito -Successo $true -MessaggioOk "OU creata: $dnPrevisto"
-        Write-LogModifica -Azione "Creazione OU" -Target $dnPrevisto -StatoPrima "N/A" -StatoDopo "Creata" `
+        Write-LogModifica -Azione "Creazione OU" -Target $dnPrevisto -StatoPrima "N/A" -StatoDopo "Creata; protezione=$statoProtezione" `
             -Motivazione $motivazione -Esito "RIUSCITA"
     }
     catch {
