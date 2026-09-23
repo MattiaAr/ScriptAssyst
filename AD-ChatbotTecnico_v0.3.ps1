@@ -2016,7 +2016,7 @@ function Get-TaskCimSession {
         return New-CimSession -ComputerName $DCServer -Credential $script:ADCredential -ErrorAction Stop
     }
     catch {
-        Write-Host "[ERRORE] Impossibile stabilire sessione CIM verso $DCServer: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[ERRORE] Impossibile stabilire sessione CIM verso ${DCServer}: $($_.Exception.Message)" -ForegroundColor Red
         if ($isIndirizzoIP) {
             Write-Host "Per un indirizzo IP lo script usa DCOM: verificare RPC/DCOM, firewall e autorizzazioni" -ForegroundColor Yellow
             Write-Host "dell'utenza tecnica sul Domain Controller. In alternativa usare il nome DNS del DC con WinRM configurato." -ForegroundColor Yellow
