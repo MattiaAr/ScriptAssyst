@@ -464,6 +464,92 @@ function Show-OUTree {
     Write-Host ""
 }
 
+function Select-CandidatoAssistito {
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Candidati,
+
+        [string]$Prompt = "Selezionare un elemento",
+
+        [scriptblock]$GetNome = { param($x) $x.Name },
+
+        [scriptblock]$GetDettaglio = { param($x) $x.DistinguishedName }
+    )
+
+    if (-not $Candidati -or $Candidati.Count -eq 0) {
+        Write-Host "[NOT FOUND] Nessun elemento disponibile." -ForegroundColor Yellow
+        return $null
+    }
+
+    # Ricerca libera tramite LIKE
+    while ($true) {
+        $ricerca = Read-Host -Prompt "$Prompt - ricerca (0 per annullare)"
+
+        if (Test-Annulla -Valore $ricerca) {
+            return $null
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ricerca)) {
+            Write-Host "  -> Inserire un termine di ricerca." -ForegroundColor Yellow
+            continue
+        }
+
+        # LIKE: ricerca parziale, case-insensitive
+        $pattern = "*$ricerca*"
+
+        $risultati = @(
+            $Candidati | Where-Object {
+                $nome = & $GetNome $_
+                $nome -like $pattern
+            }
+        )
+
+        if ($risultati.Count -eq 0) {
+            Write-Host "[NOT FOUND] Nessun elemento trovato per '$ricerca'." -ForegroundColor Yellow
+            continue
+        }
+
+        Write-Host ""
+        Write-Host "Risultati trovati:" -ForegroundColor Cyan
+
+        for ($i = 0; $i -lt $risultati.Count; $i++) {
+            $nome = & $GetNome $risultati[$i]
+            $dettaglio = & $GetDettaglio $risultati[$i]
+
+            Write-Host "  [$($i + 1)] $nome"
+            if ($dettaglio) {
+                Write-Host "      $dettaglio" -ForegroundColor DarkGray
+            }
+        }
+
+        Write-Host "  [0] Annulla"
+
+        $scelta = Read-Host "Selezionare il numero"
+
+        if (Test-Annulla -Valore $scelta) {
+            return $null
+        }
+
+        $indice = 0
+        if ([int]::TryParse($scelta, [ref]$indice) -and
+            $indice -ge 1 -and
+            $indice -le $risultati.Count) {
+
+            $selezionato = $risultati[$indice - 1]
+
+            Write-Host "Selezionato: $(& $GetNome $selezionato)" -ForegroundColor Green
+
+            if (Read-ConfermaSiNo -Prompt "Confermare la selezione?") {
+                return $selezionato
+            }
+
+            continue
+        }
+
+        Write-Host "Selezione non valida." -ForegroundColor Yellow
+    }
+}
+
 # --- Selezione assistita di una OU: mostra l'albero, chiede il nome, risolve il DN, chiede conferma ---
 function Select-OUByName {
     param(
@@ -1041,10 +1127,18 @@ function Invoke-AnalisiOU {
     if ($null -eq $dnScelto) { return }
 
     $ou = $null
+
     try {
-        $ou = Get-ADOrganizationalUnit -Identity $dnScelto -Server $DCServer -Credential $script:ADCredential -Properties Description -ErrorAction Stop
+        $ou = Get-ADOrganizationalUnit `
+            -Identity $dnScelto `
+            -Server $DCServer `
+            -Credential $script:ADCredential `
+            -Properties Description, ProtectedFromAccidentalDeletion, LinkedGroupPolicyObjects `
+            -ErrorAction Stop
     }
-    catch { $ou = $null }
+    catch {
+        $ou = $null
+    }
 
     if (-not $ou) {
         Write-Host "[NOT FOUND] OU inesistente." -ForegroundColor Yellow
@@ -1054,8 +1148,18 @@ function Invoke-AnalisiOU {
     }
 
     Write-LogVisualizzazione -Oggetto "OU ($($ou.DistinguishedName))"
+
     $ouPadre = $ou.DistinguishedName -replace '^OU=[^,]+,', ''
-    $oggettiContenuti = (Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Filter * -Server $DCServer -Credential $script:ADCredential).Count
+
+    $oggettiContenuti = (
+        Get-ADObject `
+            -SearchBase $ou.DistinguishedName `
+            -SearchScope OneLevel `
+            -Filter * `
+            -Server $DCServer `
+            -Credential $script:ADCredential
+    ).Count
+
     $gpoLinks = $ou.LinkedGroupPolicyObjects
 
     Write-Host ""
@@ -1065,9 +1169,42 @@ function Invoke-AnalisiOU {
     Write-Host "OU padre          : $ouPadre"
     Write-Host "Oggetti contenuti : $oggettiContenuti"
     Write-Host "GPO collegate     : $(if ($gpoLinks) { $gpoLinks.Count } else { 0 })"
+    Write-Host "Protezione OU     : $(if ($ou.ProtectedFromAccidentalDeletion) { 'ATTIVA' } else { 'NON ATTIVA' })"
     Write-Host ""
 
-    Read-ReturnPause
+    while ($true) {
+        Write-Host "Cosa desideri fare con questa OU?" -ForegroundColor Cyan
+        Write-Host "  1) Spostare la OU"
+        Write-Host "  2) Gestire le GPO"
+        Write-Host "  3) Creare una sotto-OU"
+        Write-Host "  0) Torna al menu OU"
+
+        $scelta = Read-Host "Selezionare un'opzione"
+
+        switch ($scelta.Trim()) {
+            '1' {
+                Invoke-SpostaOU -OU $ou
+            }
+
+            '2' {
+                Invoke-LinkPolicyOU
+            }
+
+            '3' {
+                Invoke-CreaOU -OUPadrePreselezionata $ou.DistinguishedName
+            }
+
+            '0' {
+                return
+            }
+
+            default {
+                Write-Host "Scelta non valida." -ForegroundColor Yellow
+            }
+        }
+
+        Write-Host ""
+    }
 }
 
 function Invoke-SpostaOUStandalone {
@@ -1089,18 +1226,39 @@ function Invoke-SpostaOUStandalone {
 }
 
 function Invoke-CreaOU {
+    param(
+        [string]$OUPadrePreselezionata = $null
+    )
+
     Write-LogScelta -Percorso "2.2" -Descrizione "Creazione nuova OU"
 
     $nomeNuova = Read-InputAnnullabile -Prompt "Nome nuova OU"
     if ($null -eq $nomeNuova) { return }
 
-    $ouPadre = Select-OUByName -Prompt "Selezionare la OU padre (dove verra' creata la nuova OU)"
-    if ($null -eq $ouPadre) { return }
+    if ($OUPadrePreselezionata) {
+        $ouPadre = $OUPadrePreselezionata
+        Write-Host "OU padre preselezionata: $ouPadre" -ForegroundColor Cyan
+    }
+    else {
+        $ouPadre = Select-OUByName -Prompt "Selezionare la OU padre (dove verra' creata la nuova OU)"
+        if ($null -eq $ouPadre) { return }
+    }
+
     Write-LogInput -Etichetta "Nome nuova OU / OU padre" -Valore "$nomeNuova / $ouPadre"
 
     $dnPrevisto = "OU=$nomeNuova,$ouPadre"
+
     $esiste = $null
-    try { $esiste = Get-ADOrganizationalUnit -Identity $dnPrevisto -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop } catch { $esiste = $null }
+    try {
+        $esiste = Get-ADOrganizationalUnit `
+            -Identity $dnPrevisto `
+            -Server $DCServer `
+            -Credential $script:ADCredential `
+            -ErrorAction Stop
+    }
+    catch {
+        $esiste = $null
+    }
 
     if ($esiste) {
         Write-Host "[ERRORE] La OU esiste già." -ForegroundColor Red
@@ -1109,7 +1267,39 @@ function Invoke-CreaOU {
         return
     }
 
+    $protectedChoice = Read-Host @"
+Proteggere la nuova OU dalla cancellazione accidentale?
+  1) Sì
+  2) No
+  0) Annulla
+
+Selezionare un'opzione
+"@
+
+    switch ($protectedChoice.Trim().ToUpperInvariant()) {
+        '1' {
+            $protectedFromAccidentalDeletion = $true
+        }
+
+        '2' {
+            $protectedFromAccidentalDeletion = $false
+        }
+
+        '0' {
+            Write-Host "Operazione annullata." -ForegroundColor Yellow
+            return
+        }
+
+        default {
+            Write-Host "Scelta non valida." -ForegroundColor Yellow
+            return
+        }
+    }
+
+    Write-Host ""
     Write-Host "Riepilogo: verrà creata '$dnPrevisto'"
+    Write-Host "Protezione cancellazione accidentale: $(if ($protectedFromAccidentalDeletion) { 'SÌ' } else { 'NO' })"
+
     $motivazione = Read-MotivazioneOperazione
     Write-LogInput -Etichetta "Motivazione" -Valore $motivazione
 
@@ -1120,17 +1310,38 @@ function Invoke-CreaOU {
     }
 
     try {
-        New-ADOrganizationalUnit -Name $nomeNuova -Path $ouPadre -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
+        New-ADOrganizationalUnit `
+            -Name $nomeNuova `
+            -Path $ouPadre `
+            -ProtectedFromAccidentalDeletion $protectedFromAccidentalDeletion `
+            -Server $DCServer `
+            -Credential $script:ADCredential `
+            -ErrorAction Stop
+
         Reset-OUTreeCache
+
         Show-Esito -Successo $true -MessaggioOk "OU creata: $dnPrevisto"
-        Write-LogModifica -Azione "Creazione OU" -Target $dnPrevisto -StatoPrima "N/A" -StatoDopo "Creata" `
-            -Motivazione $motivazione -Esito "RIUSCITA"
+
+        Write-LogModifica `
+            -Azione "Creazione OU" `
+            -Target $dnPrevisto `
+            -StatoPrima "N/A" `
+            -StatoDopo "Creata; Protezione cancellazione accidentale: $(if ($protectedFromAccidentalDeletion) { 'ATTIVA' } else { 'NON ATTIVA' })" `
+            -Motivazione $motivazione `
+            -Esito "RIUSCITA"
     }
     catch {
         Show-Esito -Successo $false -MessaggioKo "Errore: $($_.Exception.Message)"
-        Write-LogModifica -Azione "Creazione OU" -Target $dnPrevisto -StatoPrima "N/A" -StatoDopo "N/D (errore)" `
-            -Motivazione $motivazione -Esito "FALLITA: $($_.Exception.Message)"
+
+        Write-LogModifica `
+            -Azione "Creazione OU" `
+            -Target $dnPrevisto `
+            -StatoPrima "N/A" `
+            -StatoDopo "N/D (errore)" `
+            -Motivazione $motivazione `
+            -Esito "FALLITA: $($_.Exception.Message)"
     }
+
     Read-ReturnPause
 }
 
