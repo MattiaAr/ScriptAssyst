@@ -51,10 +51,6 @@
                          per analisi e operazioni. Spostamento OU con controlli su root,
                          discendenti e ProtectedFromAccidentalDeletion, con ripristino garantito.
                          Sessioni CIM verso indirizzi IP tramite DCOM con diagnostica dedicata.
-                         Ricerca assistita per OU, GPO, gruppi e task: match esatto seguito da
-                         suggerimenti parziali, scelta numerata o Out-GridView opzionale.
-                         Creazione OU con scelta esplicita della protezione da eliminazione
-                         accidentale e diagnostica per copie script incomplete/non aggiornate.
 #>
 
 [CmdletBinding()]
@@ -431,81 +427,6 @@ function Get-ParentDistinguishedName {
     return ($DistinguishedName -replace '^(?:\\.|[^,])+,' , '')
 }
 
-# --- Selezione assistita: cerca prima il match esatto, poi propone le corrispondenze parziali ---
-function Select-CandidatoAssistito {
-    param(
-        [object[]]$Candidati,
-        [string]$Prompt,
-        [scriptblock]$GetNome,
-        [scriptblock]$GetDettaglio
-    )
-
-    if (-not $Candidati -or $Candidati.Count -eq 0) {
-        Write-Host "[NOT FOUND] Nessun elemento disponibile per la selezione." -ForegroundColor Yellow
-        return $null
-    }
-
-    while ($true) {
-        $ricerca = Read-InputAnnullabile -Prompt $Prompt
-        if ($null -eq $ricerca) { return $null }
-
-        $esatti = @($Candidati | Where-Object { (& $GetNome $_) -eq $ricerca })
-        if ($esatti.Count -eq 1) {
-            $selezionato = $esatti[0]
-        }
-        else {
-            $pattern = "*$([System.Management.Automation.WildcardPattern]::Escape($ricerca))*"
-            $corrispondenze = @($Candidati | Where-Object { (& $GetNome $_) -like $pattern })
-
-            if ($corrispondenze.Count -eq 0) {
-                Write-Host "[NOT FOUND] Nessuna corrispondenza per '$ricerca'. Riprovare." -ForegroundColor Yellow
-                continue
-            }
-
-            if ($corrispondenze.Count -eq 1) {
-                $selezionato = $corrispondenze[0]
-            }
-            else {
-                Write-Host "Trovate $($corrispondenze.Count) corrispondenze per '$ricerca':"
-                $righeGriglia = @()
-                for ($i = 0; $i -lt $corrispondenze.Count; $i++) {
-                    $candidato = $corrispondenze[$i]
-                    $nome = & $GetNome $candidato
-                    $dettaglio = & $GetDettaglio $candidato
-                    Write-Host "  [$($i + 1)] $nome - $dettaglio"
-                    $righeGriglia += [pscustomobject]@{
-                        Numero = $i + 1
-                        Nome = $nome
-                        Dettaglio = $dettaglio
-                    }
-                }
-
-                $scelta = Read-Host "Selezionare il numero$(if (Get-Command Out-GridView -ErrorAction SilentlyContinue) { ', G per finestra grafica' }) (0 per annullare)"
-                if (Test-Annulla -Valore $scelta) { return $null }
-
-                if ($scelta.Trim().ToUpper() -eq 'G' -and (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
-                    $rigaScelta = $righeGriglia | Out-GridView -Title "Selezionare: $Prompt" -OutputMode Single
-                    if ($null -eq $rigaScelta) { return $null }
-                    $selezionato = $corrispondenze[[int]$rigaScelta.Numero - 1]
-                }
-                else {
-                    $indice = 0
-                    if (-not ([int]::TryParse($scelta, [ref]$indice)) -or $indice -lt 1 -or $indice -gt $corrispondenze.Count) {
-                        Write-Host "Selezione non valida." -ForegroundColor Yellow
-                        continue
-                    }
-                    $selezionato = $corrispondenze[$indice - 1]
-                }
-            }
-        }
-
-        $nomeScelto = & $GetNome $selezionato
-        $dettaglioScelto = & $GetDettaglio $selezionato
-        Write-Host "Selezionato: $nomeScelto - $dettaglioScelto"
-        if (Read-ConfermaSiNo -Prompt "Confermare questa selezione?") { return $selezionato }
-    }
-}
-
 function Show-OUTree {
     param([switch]$ForceRefresh)
     $tree = Get-OUTree -ForceRefresh:$ForceRefresh
@@ -549,12 +470,6 @@ function Select-OUByName {
         [string]$Prompt = "Selezionare la OU",
         [switch]$ForceRefresh
     )
-    if (-not (Get-Command -Name Select-CandidatoAssistito -CommandType Function -ErrorAction SilentlyContinue)) {
-        Write-Host "[ERRORE] Funzione di selezione assistita non disponibile." -ForegroundColor Red
-        Write-Host "Usare la copia completa e aggiornata di AD-ChatbotTecnico_v0.3.ps1." -ForegroundColor Yellow
-        Write-SessionLog -Testo "ERRORE: Select-CandidatoAssistito non disponibile; possibile copia script incompleta/non aggiornata."
-        return $null
-    }
     Show-OUTree -ForceRefresh:$ForceRefresh
     $tree = Get-OUTree
     $ouScelta = Select-CandidatoAssistito -Candidati $tree -Prompt $Prompt `
@@ -1359,6 +1274,15 @@ function Invoke-LinkPolicyOU {
         Write-Host "Opzione non valida." -ForegroundColor Yellow
         return
     }
+    $nomeGPO = Read-InputObbligatorio -Prompt "Nome della GPO"
+    Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
+
+    try { $gpo = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop }
+    catch {
+        Write-Host "[ERRORE] GPO inesistente." -ForegroundColor Red
+        Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Operazione interrotta."
+        return
+    }
     $gpo = Select-GPOByName -Prompt "Inserire nome GPO"
     if ($null -eq $gpo) { return }
     $nomeGPO = $gpo.DisplayName
@@ -1547,8 +1471,14 @@ function Invoke-LinkUnlinkGPO {
     Write-LogScelta -Percorso "3.3" -Descrizione "Link/Unlink GPO su OU"
 
     if ($null -eq $GPO) {
-        $GPO = Select-GPOByName -Prompt "Inserire nome GPO"
-        if ($null -eq $GPO) { return }
+        $nomeGPO = Read-InputAnnullabile -Prompt "Inserire nome GPO"
+        if ($null -eq $nomeGPO) { return }
+        try { $GPO = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop }
+        catch {
+            Write-Host "[ERRORE] GPO inesistente." -ForegroundColor Red
+            Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Operazione interrotta."
+            return
+        }
     }
 
     $ouTarget = Select-OUByName -Prompt "Selezionare la OU su cui operare il link"
@@ -1645,8 +1575,14 @@ function Invoke-BackupGPO {
     Write-LogScelta -Percorso "3.6" -Descrizione "Backup GPO"
 
     if ($null -eq $GPO) {
-        $GPO = Select-GPOByName -Prompt "Inserire nome GPO per il backup"
-        if ($null -eq $GPO) { return }
+        $nomeGPO = Read-InputAnnullabile -Prompt "Inserire nome GPO per il backup"
+        if ($null -eq $nomeGPO) { return }
+        try { $GPO = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop }
+        catch {
+            Write-Host "[ERRORE] GPO inesistente." -ForegroundColor Red
+            Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Backup interrotto."
+            return
+        }
     }
 
     $percorso = Read-InputObbligatorio -Prompt "Percorso di destinazione per il backup"
