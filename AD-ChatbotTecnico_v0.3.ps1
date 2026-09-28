@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+﻿﻿[CmdletBinding()]
 param(
     #[Parameter(Mandatory = $true)]
     [string]$DCServer = "192.168.1.200",
@@ -672,11 +672,12 @@ function Invoke-RicercaEAzioniUtente {
 Cosa si desidera fare?
   1) Sblocca utente
   2) Abilita utente e cambio password
-  3) Disabilita utente
-  4) Dismettere utente (disabilita + sposta OU)
-  5) Modifica appartenenza gruppi
-  6) Modifica dati utente (email, nome, displayname...)
-  7) Sposta utente in altra OU
+  3) Solo reset password (solo account Enabled)
+  4) Disabilita utente
+  5) Dismettere utente (disabilita + sposta OU)
+  6) Modifica appartenenza gruppi
+  7) Modifica dati utente (email, nome, displayname...)
+  8) Sposta utente in altra OU
   0) Torna al menu principale
 "@
     Write-Host $menuAzioni
@@ -685,11 +686,12 @@ Cosa si desidera fare?
     switch ($scelta) {
         '1' { Invoke-SbloccaUtente -Utente $utente }
         '2' { Invoke-AbilitaUtenteCambioPwd -Utente $utente }
-        '3' { Invoke-DisabilitaUtente -Utente $utente }
-        '4' { Invoke-DismettiUtente -Utente $utente }
-        '5' { Invoke-ModificaGruppiUtente -Utente $utente }
-        '6' { Invoke-ModificaDatiUtente -Utente $utente }
-        '7' { Invoke-SpostaUtenteOU -Utente $utente }
+        '3' { Invoke-ResetPasswordUtente -Utente $utente }
+        '4' { Invoke-DisabilitaUtente -Utente $utente }
+        '5' { Invoke-DismettiUtente -Utente $utente }
+        '6' { Invoke-ModificaGruppiUtente -Utente $utente }
+        '7' { Invoke-ModificaDatiUtente -Utente $utente }
+        '8' { Invoke-SpostaUtenteOU -Utente $utente }
         '0' { return }
         default { Write-Host "Opzione non valida." -ForegroundColor Yellow }
     }
@@ -726,6 +728,54 @@ function Invoke-SbloccaUtente {
         Show-Esito -Successo $false -MessaggioKo "Errore durante lo sblocco: $($_.Exception.Message)"
         Write-LogModifica -Azione "Sblocco utente" -Target "SamAccountName: $($fresh.SamAccountName)" `
             -StatoPrima "LockedOut=True" -StatoDopo "N/D (errore)" -Motivazione $motivazione -Esito "FALLITA: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-ResetPasswordUtente {
+    param($Utente)
+    Write-LogScelta -Percorso "1.3.3" -Descrizione "Solo reset password"
+
+    $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non più disponibile nella OU root." -ForegroundColor Red
+        Write-SessionLog -Testo "RESET PASSWORD: utente $($Utente.SamAccountName) non trovato al controllo aggiornato."
+        return
+    }
+    if ($fresh.Enabled -ne $true) {
+        Write-Host "[BLOCCATO] Il reset password standalone è consentito solo per account Enabled." -ForegroundColor Yellow
+        Write-Host "Lo stato dell'account non è stato modificato." -ForegroundColor Yellow
+        Write-SessionLog -Testo "RESET PASSWORD BLOCCATO: $($fresh.SamAccountName) non è Enabled. Nessuna modifica eseguita."
+        return
+    }
+
+    $motivazione = Read-MotivazioneOperazione
+    Write-LogInput -Etichetta "Motivazione" -Valore $motivazione
+    Write-SessionLog -Testo "INPUT: Nuova password = '********' (non registrata per motivi di sicurezza)"
+    if (-not (Read-ConfermaSiNo -Prompt "Confermare SOLO il reset password per $($fresh.SamAccountName)? L'account resterà Enabled.")) {
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA dal tecnico (solo reset password $($fresh.SamAccountName))"
+        return
+    }
+
+    try {
+        $operazioneOk = Invoke-PasswordConCriteriRetry -Prompt "Inserire nuova password per $($fresh.SamAccountName)" -Azione {
+            param($pwdTentativo)
+            Set-ADAccountPassword -Identity $fresh.DistinguishedName -NewPassword $pwdTentativo -Reset -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
+        }
+        if (-not $operazioneOk) {
+            Write-Host "[ANNULLATO] Reset password annullato." -ForegroundColor Yellow
+            Write-SessionLog -Testo "RESET PASSWORD ANNULLATO: $($fresh.SamAccountName)."
+            return
+        }
+        Show-Esito -Successo $true -MessaggioOk "Password aggiornata. L'account è rimasto Enabled."
+        Write-LogModifica -Azione "Solo reset password" -Target "SamAccountName: $($fresh.SamAccountName)" `
+            -StatoPrima "Enabled=True, password precedente non esposta" -StatoDopo "Enabled=True, password reimpostata (valore non loggato)" `
+            -Motivazione $motivazione -Esito "RIUSCITA"
+    }
+    catch {
+        Show-Esito -Successo $false -MessaggioKo "Reset password fallito: $($_.Exception.Message)"
+        Write-LogModifica -Azione "Solo reset password" -Target "SamAccountName: $($fresh.SamAccountName)" `
+            -StatoPrima "Enabled=True" -StatoDopo "Enabled=True, password non confermata" `
+            -Motivazione $motivazione -Esito "FALLITA: $($_.Exception.Message)"
     }
 }
 
@@ -973,6 +1023,11 @@ function Invoke-ModificaGruppiUtente {
 
     Write-Host "1) Aggiungere gruppi   2) Rimuovere gruppi"
     $azione = Read-Host "Selezionare un'opzione"
+    if ($azione -notin @('1', '2')) {
+        Write-Host "Opzione non valida. Operazione annullata." -ForegroundColor Yellow
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA: scelta azione gruppo non valida ('$azione')."
+        return
+    }
     $gruppiInput = Read-InputObbligatorio -Prompt "Inserire nome/i gruppo (separati da virgola)"
     Write-LogInput -Etichetta "Gruppi indicati" -Valore $gruppiInput
     $listaGruppi = $gruppiInput -split ',' | ForEach-Object { $_.Trim() }
@@ -1056,8 +1111,10 @@ function Invoke-ModificaDatiUtente {
         return
     }
 
+    $displayNameDopo = if ($params.ContainsKey('DisplayName')) { $params['DisplayName'] } else { $fresh.DisplayName }
+    $emailDopo = if ($params.ContainsKey('EmailAddress')) { $params['EmailAddress'] } else { $fresh.EmailAddress }
     Write-Host ""
-    Write-Host "RIEPILOGO: $statoPrima  -->  DisplayName=$nuovoDisplayName, Email=$nuovaEmail"
+    Write-Host "RIEPILOGO: $statoPrima  -->  DisplayName=$displayNameDopo, Email=$emailDopo"
     $motivazione = Read-MotivazioneOperazione
     Write-LogInput -Etichetta "Motivazione" -Valore $motivazione
 
@@ -1070,7 +1127,7 @@ function Invoke-ModificaDatiUtente {
         Set-ADUser -Identity $fresh.DistinguishedName @params -Server $DCServer -Credential $script:ADCredential -ErrorAction Stop
         Show-Esito -Successo $true -MessaggioOk "Dati aggiornati."
         Write-LogModifica -Azione "Modifica dati utente" -Target "SamAccountName: $($fresh.SamAccountName)" `
-            -StatoPrima $statoPrima -StatoDopo "DisplayName=$nuovoDisplayName, Email=$nuovaEmail" `
+            -StatoPrima $statoPrima -StatoDopo "DisplayName=$displayNameDopo, Email=$emailDopo" `
             -Motivazione $motivazione -Esito "RIUSCITA"
     }
     catch {
@@ -1335,6 +1392,7 @@ function Invoke-AnalisiOU {
     # ============================================================
 
     while ($true) {
+        $tree = @(Get-OUTree -ForceRefresh)
 
         Write-Host ""
         Write-Host "Cosa desideri fare con questa OU?" -ForegroundColor Cyan
@@ -1365,7 +1423,7 @@ function Invoke-AnalisiOU {
             }
 
             '2' {
-                Invoke-LinkPolicyOU
+                Invoke-LinkPolicyOU -OUDistinguishedName $ou.DistinguishedName
             }
 
             '3' {
@@ -1716,6 +1774,7 @@ function Invoke-SpostaOU {
 }
 
 function Invoke-LinkPolicyOU {
+    param([string]$OUDistinguishedName = $null)
     Write-LogScelta -Percorso "2.4" -Descrizione "Collega/rimuovi policy su OU"
 
     if (-not $script:GPOModuleAvailable) {
@@ -1723,8 +1782,13 @@ function Invoke-LinkPolicyOU {
         return
     }
 
-    $dnOU = Select-OUByName -Prompt "Selezionare la OU su cui operare il collegamento"
-    if ($null -eq $dnOU) { return }
+    if ([string]::IsNullOrWhiteSpace($OUDistinguishedName)) {
+        $dnOU = Select-OUByName -Prompt "Selezionare la OU su cui operare il collegamento"
+        if ($null -eq $dnOU) { return }
+    }
+    else {
+        $dnOU = $OUDistinguishedName
+    }
     try {
         $OU = Get-ADOrganizationalUnit -Identity $dnOU -Server $DCServer -Credential $script:ADCredential `
             -Properties LinkedGroupPolicyObjects -ErrorAction Stop
@@ -1741,16 +1805,7 @@ function Invoke-LinkPolicyOU {
         Write-Host "Opzione non valida." -ForegroundColor Yellow
         return
     }
-    $nomeGPO = Read-InputObbligatorio -Prompt "Nome della GPO"
-    Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
-
-    try { $gpo = Get-GPO -Name $nomeGPO -Server $DCServer -ErrorAction Stop }
-    catch {
-        Write-Host "[ERRORE] GPO inesistente." -ForegroundColor Red
-        Write-SessionLog -Testo "VERIFICA: GPO '$nomeGPO' NON esiste. Operazione interrotta."
-        return
-    }
-    $gpo = Select-GPOByName -Prompt "Inserire nome GPO"
+    $gpo = Select-GPOByName -Prompt "Selezionare la GPO"
     if ($null -eq $gpo) { return }
     $nomeGPO = $gpo.DisplayName
     Write-LogInput -Etichetta "Nome GPO" -Valore $nomeGPO
@@ -2455,6 +2510,11 @@ function Invoke-ModificaMembriGruppo {
 
     Write-Host "1) Aggiungere utenti   2) Rimuovere utenti"
     $azione = Read-Host "Selezionare un'opzione"
+    if ($azione -notin @('1', '2')) {
+        Write-Host "Opzione non valida. Operazione annullata." -ForegroundColor Yellow
+        Write-SessionLog -Testo "OPERAZIONE ANNULLATA: scelta azione gruppo non valida ('$azione')."
+        return
+    }
     $inputUtenti = Read-InputObbligatorio -Prompt "Nome/i utente (separati da virgola)"
     Write-LogInput -Etichetta "Utenti indicati" -Valore $inputUtenti
     $listaUtenti = $inputUtenti -split ',' | ForEach-Object { $_.Trim() }
