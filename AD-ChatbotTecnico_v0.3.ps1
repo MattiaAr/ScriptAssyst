@@ -473,7 +473,9 @@ function Select-CandidatoAssistito {
 
         [scriptblock]$GetNome = { param($x) $x.Name },
 
-        [scriptblock]$GetDettaglio = { param($x) $x.DistinguishedName }
+        [scriptblock]$GetDettaglio = { param($x) $x.DistinguishedName },
+        
+        [string]$RicercaIniziale = $null
     )
 
     if (-not $Candidati -or $Candidati.Count -eq 0) {
@@ -483,7 +485,14 @@ function Select-CandidatoAssistito {
 
     # Ricerca libera tramite LIKE
     while ($true) {
-        $ricerca = Read-Host -Prompt "$Prompt - ricerca (0 per annullare)"
+
+        if ($null -ne $RicercaIniziale) {
+            $ricerca = $RicercaIniziale
+            $RicercaIniziale = $null
+        }
+        else {
+            $ricerca = Read-Host -Prompt "$Prompt - ricerca (0 per annullare)"
+        }
 
         if (Test-Annulla -Valore $ricerca) {
             return $null
@@ -500,7 +509,7 @@ function Select-CandidatoAssistito {
         $risultati = @(
             $Candidati | Where-Object {
                 $nome = & $GetNome $_
-                $nome -like $pattern
+                $nome -ilike $pattern
             }
         )
 
@@ -556,13 +565,84 @@ function Select-OUByName {
         [string]$Prompt = "Selezionare la OU",
         [switch]$ForceRefresh
     )
+
     Show-OUTree -ForceRefresh:$ForceRefresh
-    $tree = Get-OUTree
-    $ouScelta = Select-CandidatoAssistito -Candidati $tree -Prompt $Prompt `
-        -GetNome { param($ou) $ou.Name } `
-        -GetDettaglio { param($ou) $ou.DistinguishedName }
-    if ($null -eq $ouScelta) { return $null }
-    return $ouScelta.DistinguishedName
+    $tree = @(Get-OUTree)
+
+    if (-not $tree -or $tree.Count -eq 0) {
+        Write-Host "[NOT FOUND] Nessuna OU disponibile." -ForegroundColor Yellow
+        return $null
+    }
+
+    while ($true) {
+
+        $ricerca = Read-Host "$Prompt - inserire nome OU (0 per annullare)"
+
+        if (Test-Annulla -Valore $ricerca) {
+            return $null
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ricerca)) {
+            Write-Host "  -> Inserire un termine di ricerca." -ForegroundColor Yellow
+            continue
+        }
+
+        $risultati = @(
+            $tree | Where-Object {
+                $_.Name -ilike "*$ricerca*"
+            }
+        )
+
+        if ($risultati.Count -eq 0) {
+            Write-Host "[NOT FOUND] Nessuna OU trovata per '$ricerca'." -ForegroundColor Yellow
+            continue
+        }
+
+        Write-Host ""
+        Write-Host "OU trovate:" -ForegroundColor Cyan
+
+        for ($i = 0; $i -lt $risultati.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($risultati[$i].Name)"
+            Write-Host "      $($risultati[$i].DistinguishedName)" -ForegroundColor DarkGray
+        }
+
+        Write-Host "  [0] Annulla"
+
+        $scelta = Read-Host "Selezionare il numero"
+
+        if (Test-Annulla -Valore $scelta) {
+            return $null
+        }
+
+        $indice = 0
+
+        if (
+            [int]::TryParse($scelta, [ref]$indice) -and
+            $indice -ge 1 -and
+            $indice -le $risultati.Count
+        ) {
+
+            $ouScelta = $risultati[$indice - 1]
+
+            Write-Host ""
+            Write-Host "Selezionato: $($ouScelta.Name)" -ForegroundColor Green
+            Write-Host "DN: $($ouScelta.DistinguishedName)"
+
+            $conferma = Read-ConfermaSiNo -Prompt "Confermare la selezione?"
+
+            if ($conferma -eq $true) {
+                return $ouScelta.DistinguishedName
+            }
+
+            if ($null -eq $conferma) {
+                return $null
+            }
+
+            continue
+        }
+
+        Write-Host "Selezione non valida." -ForegroundColor Yellow
+    }
 }
 #endregion
 
@@ -1123,67 +1203,220 @@ Cosa si desidera fare?
 function Invoke-AnalisiOU {
     Write-LogScelta -Percorso "2.1" -Descrizione "Analisi OU esistente"
 
-    $dnScelto = Select-OUByName -Prompt "Selezionare la OU da analizzare"
-    if ($null -eq $dnScelto) { return }
+    # ============================================================
+    # RICERCA DI UNA O PIU' OU
+    # ============================================================
 
-    $ou = $null
+    Show-OUTree
+    $tree = @(Get-OUTree)
 
-    try {
-        $ou = Get-ADOrganizationalUnit `
-            -Identity $dnScelto `
-            -Server $DCServer `
-            -Credential $script:ADCredential `
-            -Properties Description, ProtectedFromAccidentalDeletion, LinkedGroupPolicyObjects `
-            -ErrorAction Stop
-    }
-    catch {
-        $ou = $null
+    if (-not $tree -or $tree.Count -eq 0) {
+        Write-Host "[NOT FOUND] Nessuna OU disponibile." -ForegroundColor Yellow
+        return
     }
 
-    if (-not $ou) {
-        Write-Host "[NOT FOUND] OU inesistente." -ForegroundColor Yellow
-        Write-SessionLog -Testo "RISULTATO RICERCA OU '$dnScelto': NON TROVATA"
+    $inputOU = Read-InputObbligatorio -Prompt "Selezionare nome/nomi OU (separati da virgola)"
+    Write-LogInput -Etichetta "OU richieste" -Valore $inputOU
+
+    $nomi = @(
+        $inputOU -split ',' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    $trovate = @()
+    $nonTrovate = @()
+
+    foreach ($nome in $nomi) {
+
+        $pattern = "*$nome*"
+
+        $match = @(
+            $tree | Where-Object {
+                $_.Name -ilike $pattern
+            }
+        )
+
+        if ($match.Count -eq 0) {
+            $nonTrovate += $nome
+        }
+        else {
+            $trovate += $match
+        }
+    }
+
+    $trovate = @(
+        $trovate |
+            Sort-Object DistinguishedName -Unique
+    )
+
+    if ($trovate.Count -eq 0) {
+        Write-Host "[NOT FOUND] Nessuna OU trovata." -ForegroundColor Yellow
+        Write-SessionLog -Testo "RISULTATO RICERCA OU '$inputOU': NESSUNA TROVATA"
+        return
+    }
+
+    if ($nonTrovate.Count -gt 0) {
+        Write-Host ""
+        Write-Host "[AVVISO] OU non trovate: $($nonTrovate -join ', ')" -ForegroundColor Yellow
+        Write-SessionLog -Testo "AVVISO: OU non trovate: $($nonTrovate -join ', ')"
+    }
+
+    Write-LogVisualizzazione -Oggetto "OU ($($trovate.Name -join ', '))"
+
+    # ============================================================
+    # FUNZIONE LOCALE PER MOSTRARE I DETTAGLI DI UNA OU
+    # ============================================================
+
+    $righeExport = @()
+
+    function Show-OUAnalisi {
+        param(
+            [Parameter(Mandatory = $true)]
+            $OU
+        )
+
+        try {
+            $ouDettaglio = Get-ADOrganizationalUnit `
+                -Identity $OU.DistinguishedName `
+                -Server $DCServer `
+                -Credential $script:ADCredential `
+                -Properties Description, ProtectedFromAccidentalDeletion, LinkedGroupPolicyObjects `
+                -ErrorAction Stop
+
+            $ouPadre = $OU.DistinguishedName -replace '^OU=[^,]+,', ''
+
+            $oggettiContenuti = @(
+                Get-ADObject `
+                    -SearchBase $OU.DistinguishedName `
+                    -SearchScope OneLevel `
+                    -Filter * `
+                    -Server $DCServer `
+                    -Credential $script:ADCredential `
+                    -ErrorAction SilentlyContinue
+            ).Count
+
+            $gpoLinks = $ouDettaglio.LinkedGroupPolicyObjects
+
+            Write-Host ""
+            Write-Host "[$($OU.Name)]" -ForegroundColor Green
+            Write-Host "  DistinguishedName : $($OU.DistinguishedName)"
+            Write-Host "  Description       : $($ouDettaglio.Description)"
+            Write-Host "  OU padre          : $ouPadre"
+            Write-Host "  Oggetti contenuti : $oggettiContenuti"
+            Write-Host "  GPO collegate     : $(if ($gpoLinks) { $gpoLinks.Count } else { 0 })"
+            Write-Host "  Protezione OU     : $(if ($ouDettaglio.ProtectedFromAccidentalDeletion) { 'ATTIVA' } else { 'NON ATTIVA' })"
+
+            return @(
+                "[$($OU.Name)]",
+                "  DistinguishedName : $($OU.DistinguishedName)",
+                "  Description       : $($ouDettaglio.Description)",
+                "  OU padre          : $ouPadre",
+                "  Oggetti contenuti : $oggettiContenuti",
+                "  GPO collegate     : $(if ($gpoLinks) { $gpoLinks.Count } else { 0 })",
+                "  Protezione OU     : $(if ($ouDettaglio.ProtectedFromAccidentalDeletion) { 'ATTIVA' } else { 'NON ATTIVA' })",
+                ""
+            )
+        }
+        catch {
+            Write-Host ""
+            Write-Host "[$($OU.Name)]" -ForegroundColor Green
+            Write-Host "  [ERRORE] Impossibile recuperare i dettagli: $($_.Exception.Message)" -ForegroundColor Red
+
+            return @(
+                "[$($OU.Name)]",
+                "  [ERRORE] $($_.Exception.Message)",
+                ""
+            )
+        }
+    }
+
+    # ============================================================
+    # PIU' OU -> SOLO ANALISI
+    # ============================================================
+
+    if ($trovate.Count -gt 1) {
+
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "             OU TROVATE" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+
+        foreach ($ou in $trovate) {
+            $righeExport += Show-OUAnalisi -OU $ou
+        }
+
+        # Esportazione SOLO per la ricerca multipla
+        if (Read-ConfermaSiNo -Prompt "Si desidera esportare in TXT il risultato di questa ricerca?") {
+
+            $ok, $path = Export-RisultatoTxt `
+                -Prefisso "AnalisiOU" `
+                -Righe $righeExport
+
+            if ($ok) {
+                Write-Host "[OK] Esportato in: $path" -ForegroundColor Green
+                Write-SessionLog -Testo "EXPORT: risultato analisi OU esportato in '$path'"
+            }
+            else {
+                Write-Host "[ERRORE] Esportazione fallita: $path" -ForegroundColor Red
+                Write-SessionLog -Testo "EXPORT: FALLITO - $path"
+            }
+        }
+
+        Write-Host ""
+        Write-Host "Sono state trovate più OU." -ForegroundColor Cyan
+        Write-Host "Per eseguire un'operazione su una OU specifica, ripetere la ricerca indicando una sola OU."
+
         Read-ReturnPause
         return
     }
 
-    Write-LogVisualizzazione -Oggetto "OU ($($ou.DistinguishedName))"
+    # ============================================================
+    # UNA SOLA OU
+    # ============================================================
 
-    $ouPadre = $ou.DistinguishedName -replace '^OU=[^,]+,', ''
-
-    $oggettiContenuti = (
-        Get-ADObject `
-            -SearchBase $ou.DistinguishedName `
-            -SearchScope OneLevel `
-            -Filter * `
-            -Server $DCServer `
-            -Credential $script:ADCredential
-    ).Count
-
-    $gpoLinks = $ou.LinkedGroupPolicyObjects
+    $ou = $trovate[0]
 
     Write-Host ""
-    Write-Host "Nome              : $($ou.Name)"
-    Write-Host "DistinguishedName : $($ou.DistinguishedName)"
-    Write-Host "Descrizione       : $($ou.Description)"
-    Write-Host "OU padre          : $ouPadre"
-    Write-Host "Oggetti contenuti : $oggettiContenuti"
-    Write-Host "GPO collegate     : $(if ($gpoLinks) { $gpoLinks.Count } else { 0 })"
-    Write-Host "Protezione OU     : $(if ($ou.ProtectedFromAccidentalDeletion) { 'ATTIVA' } else { 'NON ATTIVA' })"
-    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "              OU ANALIZZATA" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+
+    $null = Show-OUAnalisi -OU $ou
+
+    # ============================================================
+    # MENU CONTESTUALE
+    # ============================================================
 
     while ($true) {
+
+        Write-Host ""
         Write-Host "Cosa desideri fare con questa OU?" -ForegroundColor Cyan
         Write-Host "  1) Spostare la OU"
         Write-Host "  2) Gestire le GPO"
         Write-Host "  3) Creare una sotto-OU"
+        Write-Host "  4) Analizzare tutte le sotto-OU"
         Write-Host "  0) Torna al menu OU"
 
         $scelta = Read-Host "Selezionare un'opzione"
 
         switch ($scelta.Trim()) {
+
             '1' {
-                Invoke-SpostaOU -OU $ou
+                try {
+                    $ouCompleta = Get-ADOrganizationalUnit `
+                        -Identity $ou.DistinguishedName `
+                        -Server $DCServer `
+                        -Credential $script:ADCredential `
+                        -Properties Description, ProtectedFromAccidentalDeletion, LinkedGroupPolicyObjects `
+                        -ErrorAction Stop
+
+                    Invoke-SpostaOU -OU $ouCompleta
+                }
+                catch {
+                    Write-Host "[ERRORE] Impossibile recuperare la OU: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
 
             '2' {
@@ -1194,6 +1427,93 @@ function Invoke-AnalisiOU {
                 Invoke-CreaOU -OUPadrePreselezionata $ou.DistinguishedName
             }
 
+            '4' {
+
+            # ====================================================
+            # RICERCA DI TUTTE LE SOTTO-OU
+            # ====================================================
+
+            $sottoOU = @()
+
+            foreach ($candidata in $tree) {
+
+                if ($candidata.DistinguishedName -eq $ou.DistinguishedName) {
+                    continue
+                }
+
+                $padreCorrente = Get-ParentDistinguishedName `
+                    -DistinguishedName $candidata.DistinguishedName
+
+                while ($padreCorrente) {
+
+                    if ($padreCorrente -eq $ou.DistinguishedName) {
+                        $sottoOU += $candidata
+                        break
+                    }
+
+                    if ($padreCorrente -eq $OURoot) {
+                        break
+                    }
+
+                    $nuovoPadre = Get-ParentDistinguishedName `
+                        -DistinguishedName $padreCorrente
+
+                    if ($nuovoPadre -eq $padreCorrente) {
+                        break
+                    }
+
+                    $padreCorrente = $nuovoPadre
+                }
+            }
+
+            $sottoOU = @(
+                $sottoOU |
+                    Sort-Object DistinguishedName -Unique
+            )
+
+            Write-Host ""
+
+            if ($sottoOU.Count -eq 0) {
+                Write-Host "[INFO] La OU '$($ou.Name)' non contiene sotto-OU." -ForegroundColor Yellow
+                Read-ReturnPause
+                continue
+            }
+
+            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "        SOTTO-OU DI $($ou.Name)" -ForegroundColor Cyan
+            Write-Host "========================================" -ForegroundColor Cyan
+
+            $righeSottoOU = @()
+
+            foreach ($sotto in $sottoOU) {
+                $righeSottoOU += Show-OUAnalisi -OU $sotto
+            }
+
+            Write-Host ""
+            Write-Host "Totale sotto-OU analizzate: $($sottoOU.Count)" -ForegroundColor Cyan
+
+            # ====================================================
+            # ESPORTAZIONE RISULTATO SOTTO-OU
+            # ====================================================
+
+            if (Read-ConfermaSiNo -Prompt "Si desidera esportare in TXT il risultato dell'analisi delle sotto-OU?") {
+
+                $ok, $path = Export-RisultatoTxt `
+                    -Prefisso "AnalisiSottoOU_$($ou.Name)" `
+                    -Righe $righeSottoOU
+
+                if ($ok) {
+                    Write-Host "[OK] Esportato in: $path" -ForegroundColor Green
+                    Write-SessionLog -Testo "EXPORT: analisi sotto-OU di '$($ou.Name)' esportata in '$path'"
+                }
+                else {
+                    Write-Host "[ERRORE] Esportazione fallita: $path" -ForegroundColor Red
+                    Write-SessionLog -Testo "EXPORT: FALLITO - analisi sotto-OU di '$($ou.Name)' - $path"
+                }
+            }
+
+            Read-ReturnPause
+        }
             '0' {
                 return
             }
@@ -1851,7 +2171,11 @@ function Invoke-ForzaGPUpdate {
 #region ============================ 4. GESTIONE GRUPPI ============================
 
 function Select-ADGroupByName {
-    param([string]$Prompt = "Inserire nome gruppo")
+    param(
+        [string]$Prompt = "Inserire nome gruppo",
+        [string]$RicercaIniziale = $null
+    )
+
     try {
         $gruppiDisponibili = @(Get-ADGroup -Filter * -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential `
             -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged -ErrorAction Stop)
@@ -1862,6 +2186,7 @@ function Select-ADGroupByName {
     }
 
     return Select-CandidatoAssistito -Candidati $gruppiDisponibili -Prompt $Prompt `
+        -RicercaIniziale $RicercaIniziale `
         -GetNome { param($gruppo) $gruppo.Name } `
         -GetDettaglio { param($gruppo) $gruppo.DistinguishedName }
 }
@@ -1900,14 +2225,59 @@ function Invoke-AnalizzaGruppi {
 
     $input_gruppi = Read-InputObbligatorio -Prompt "Specificare nome/nomi gruppo (separati da virgola)"
     Write-LogInput -Etichetta "Gruppi richiesti" -Valore $input_gruppi
-    $nomi = $input_gruppi -split ',' | ForEach-Object { $_.Trim() }
+
+    $nomi = @(
+        $input_gruppi -split ',' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+
+    try {
+        $gruppiDisponibili = @(
+            Get-ADGroup `
+                -Filter * `
+                -SearchBase $OURoot `
+                -Server $DCServer `
+                -Credential $script:ADCredential `
+                -Properties Description, GroupCategory, GroupScope, whenCreated, whenChanged `
+                -ErrorAction Stop
+        )
+    }
+    catch {
+        Write-Host "[ERRORE] Impossibile recuperare i gruppi: $($_.Exception.Message)" -ForegroundColor Red
+        Write-SessionLog -Testo "ERRORE RECUPERO GRUPPI: $($_.Exception.Message)"
+        return
+    }
 
     $trovati = @()
     $nonTrovati = @()
+
     foreach ($n in $nomi) {
-        $g = Select-ADGroupByName -Prompt "Cercare gruppo '$n'"
-        if ($g) { $trovati += $g } else { $nonTrovati += $n }
+
+        # Ricerca parziale, case-insensitive.
+        # Esempio: "cOmM" trova "Commerciale".
+        $pattern = "*$n*"
+
+        $match = @(
+            $gruppiDisponibili | Where-Object {
+                $_.Name -ilike $pattern
+            }
+        )
+
+        if ($match.Count -eq 0) {
+            $nonTrovati += $n
+        }
+        else {
+            $trovati += $match
+        }
     }
+
+    # Elimina eventuali duplicati se due ricerche trovano lo stesso gruppo.
+    $trovati = @(
+        $trovati |
+            Sort-Object DistinguishedName -Unique
+    )
 
     if ($trovati.Count -eq 0) {
         Write-Host "[NOT FOUND] Nessun gruppo trovato." -ForegroundColor Yellow
@@ -1916,31 +2286,125 @@ function Invoke-AnalizzaGruppi {
     }
 
     Write-LogVisualizzazione -Oggetto "gruppi ($($trovati.Name -join ', '))"
+
     if ($nonTrovati.Count -gt 0) {
+        Write-Host ""
         Write-Host "[AVVISO] Non trovati: $($nonTrovati -join ', ')" -ForegroundColor Yellow
         Write-SessionLog -Testo "AVVISO: gruppi non trovati: $($nonTrovati -join ', ')"
     }
 
+    # ============================================================
+    # RIEPILOGO DEI GRUPPI
+    # ============================================================
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "          GRUPPI TROVATI" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+
     $righeExport = @()
-    foreach ($g in $trovati) {
-        $membri = (Get-ADGroupMember -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name -join ', '
-        $memberOf = (Get-ADPrincipalGroupMembership -Identity $g.DistinguishedName -Server $DCServer -Credential $script:ADCredential -ErrorAction SilentlyContinue).Name -join ', '
-        $blocco = @(
-            "Name             : $($g.Name)",
-            "DistinguishedName: $($g.DistinguishedName)",
-            "Members          : $membri",
-            "MemberOf         : $memberOf",
-            "Description      : $($g.Description)",
-            "whenCreated      : $($g.whenCreated)",
-            "whenChanged      : $($g.whenChanged)",
+
+    for ($i = 0; $i -lt $trovati.Count; $i++) {
+
+        $g = $trovati[$i]
+
+        Write-Host ""
+        Write-Host "[$($i + 1)] $($g.Name)" -ForegroundColor Green
+        Write-Host "    DistinguishedName : $($g.DistinguishedName)"
+        Write-Host "    Description       : $($g.Description)"
+        Write-Host "    GroupScope        : $($g.GroupScope)"
+        Write-Host "    GroupCategory     : $($g.GroupCategory)"
+        Write-Host "    whenCreated       : $($g.whenCreated)"
+        Write-Host "    whenChanged       : $($g.whenChanged)"
+
+        $righeExport += @(
+            "[$($i + 1)] $($g.Name)",
+            "    DistinguishedName : $($g.DistinguishedName)",
+            "    Description       : $($g.Description)",
+            "    GroupScope        : $($g.GroupScope)",
+            "    GroupCategory     : $($g.GroupCategory)",
+            "    whenCreated       : $($g.whenCreated)",
+            "    whenChanged       : $($g.whenChanged)",
             ""
         )
-        $blocco | ForEach-Object { Write-Host $_ }
-        $righeExport += $blocco
     }
 
-    if (Read-ConfermaSiNo -Prompt "Si desidera esportare in TXT il risultato di questa ricerca?") {
-        $ok, $path = Export-RisultatoTxt -Prefisso "AnalisiGruppi" -Righe $righeExport
+    # ============================================================
+    # MENU MEMBRI
+    # ============================================================
+
+    while ($true) {
+
+        Write-Host ""
+        Write-Host "Cosa desideri fare?" -ForegroundColor Cyan
+
+        for ($i = 0; $i -lt $trovati.Count; $i++) {
+            Write-Host "  $($i + 1)) Mostrare membri di $($trovati[$i].Name)"
+        }
+
+        Write-Host "  0) Torna indietro"
+
+        $scelta = Read-Host "Selezionare un'opzione"
+
+        if (Test-Annulla -Valore $scelta) {
+            break
+        }
+
+        $indice = 0
+
+        if (
+            [int]::TryParse($scelta, [ref]$indice) -and
+            $indice -ge 1 -and
+            $indice -le $trovati.Count
+        ) {
+
+            $g = $trovati[$indice - 1]
+
+            Write-Host ""
+            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "MEMBRI DI: $($g.Name)" -ForegroundColor Cyan
+            Write-Host "========================================" -ForegroundColor Cyan
+
+            try {
+                $membri = @(
+                    Get-ADGroupMember `
+                        -Identity $g.DistinguishedName `
+                        -Server $DCServer `
+                        -Credential $script:ADCredential `
+                        -ErrorAction Stop |
+                    Sort-Object Name
+                )
+
+                if ($membri.Count -eq 0) {
+                    Write-Host "(Nessun membro)" -ForegroundColor Yellow
+                }
+                else {
+                    foreach ($membro in $membri) {
+                        Write-Host "  - $($membro.Name) [$($membro.objectClass)]"
+                    }
+                }
+            }
+            catch {
+                Write-Host "[ERRORE] Impossibile recuperare i membri: $($_.Exception.Message)" -ForegroundColor Red
+            }
+
+            Read-ReturnPause
+            continue
+        }
+
+        Write-Host "Selezione non valida." -ForegroundColor Yellow
+    }
+
+    # ============================================================
+    # ESPORTAZIONE
+    # ============================================================
+
+    if (Read-ConfermaSiNo -Prompt "Si desidera esportare in TXT il riepilogo dei gruppi?") {
+
+        $ok, $path = Export-RisultatoTxt `
+            -Prefisso "AnalisiGruppi" `
+            -Righe $righeExport
+
         if ($ok) {
             Write-Host "[OK] Esportato in: $path" -ForegroundColor Green
             Write-SessionLog -Testo "EXPORT: risultato analisi gruppi esportato in '$path'"
