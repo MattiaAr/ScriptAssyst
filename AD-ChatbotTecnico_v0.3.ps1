@@ -1,4 +1,4 @@
-﻿﻿[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     #[Parameter(Mandatory = $true)]
     [string]$DCServer = "192.168.1.200",
@@ -616,12 +616,15 @@ function Find-ADUserInRoot {
     $props = 'DisplayName','SamAccountName','DistinguishedName','Enabled','LockedOut','PasswordLastSet',
              'LastBadPasswordAttempt','BadLogonCount','EmailAddress','LastLogonDate','whenCreated','whenChanged',
              'GivenName','Surname','UserPrincipalName'
+    if ([string]::IsNullOrWhiteSpace($Identity)) { return $null }
     try {
-        # Tenta ricerca per SamAccountName, poi per UserPrincipalName/Name generico
-        $filter = "SamAccountName -eq '$Identity' -or UserPrincipalName -eq '$Identity' -or Name -eq '$Identity'"
-        $u = Get-ADUser -Filter $filter -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties $props -ErrorAction Stop
-        if ($u -is [array]) { return $u[0] }
-        return $u
+        # Escape dei caratteri speciali LDAP per evitare filtri malformati.
+        $escapedIdentity = $Identity.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([string][char]0, '\00')
+        $ldapFilter = "(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=$escapedIdentity)(userPrincipalName=$escapedIdentity)(name=$escapedIdentity)))"
+        $u = @(Get-ADUser -LDAPFilter $ldapFilter -SearchBase $OURoot -Server $DCServer -Credential $script:ADCredential -Properties $props -ErrorAction Stop)
+        if ($u.Count -gt 1) { Write-Host "[AVVISO] Ricerca ambigua per '$Identity': selezionato il primo risultato." -ForegroundColor Yellow }
+        if ($u.Count -gt 0) { return $u[0] }
+        return $null
     }
     catch {
         Write-LogErrore -Contesto "Find-ADUserInRoot" -Messaggio $_.Exception.Message
@@ -703,6 +706,11 @@ function Invoke-SbloccaUtente {
     Write-LogScelta -Percorso "1.3.1" -Descrizione "Sblocca utente"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     if (-not $fresh.LockedOut) {
         Write-Host "[INFO] L'utente non risulta bloccato. Nessuna modifica eseguita." -ForegroundColor Yellow
         Write-SessionLog -Testo "VERIFICA: utente $($fresh.SamAccountName) NON risulta bloccato (LockedOut=False). Nessuna modifica eseguita."
@@ -784,6 +792,11 @@ function Invoke-AbilitaUtenteCambioPwd {
     Write-LogScelta -Percorso "1.3.2" -Descrizione "Abilita utente + cambio password"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     if ($fresh.Enabled) {
         Write-Host "[ERRORE] L'utente non è disabilitato. Nessuna modifica eseguita." -ForegroundColor Yellow
         Write-SessionLog -Testo "VERIFICA: utente $($fresh.SamAccountName) risulta già ABILITATO. Nessuna modifica eseguita."
@@ -829,6 +842,11 @@ function Invoke-DisabilitaUtente {
     Write-LogScelta -Percorso "1.3.3" -Descrizione "Disabilita utente"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     if (-not $fresh.Enabled) {
         Write-Host "[ERRORE] L'utente non è abilitato. Nessuna modifica eseguita." -ForegroundColor Yellow
         Write-SessionLog -Testo "VERIFICA: utente $($fresh.SamAccountName) risulta già DISABILITATO. Nessuna modifica eseguita."
@@ -861,6 +879,11 @@ function Invoke-DismettiUtente {
     Write-LogScelta -Percorso "1.3.4" -Descrizione "Dismissione utente (disabilita + sposta OU)"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     $ouDestinazione = Select-OUByName -Prompt "Selezionare la OU di destinazione (es. Dismessi)"
     if ($null -eq $ouDestinazione) {
         Write-SessionLog -Testo "OPERAZIONE ANNULLATA dal tecnico (selezione OU dismissione utente $($fresh.SamAccountName))"
@@ -1017,6 +1040,11 @@ function Invoke-ModificaGruppiUtente {
     Write-LogScelta -Percorso "1.3.6" -Descrizione "Modifica appartenenza gruppi"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     $gruppiAttuali = Get-ADPrincipalGroupMembership -Identity $fresh.DistinguishedName -Server $DCServer -Credential $script:ADCredential |
         Select-Object -ExpandProperty Name
     Write-Host "Gruppi attuali: $($gruppiAttuali -join ', ')"
@@ -1090,6 +1118,11 @@ function Invoke-ModificaDatiUtente {
     Write-LogScelta -Percorso "1.3.7" -Descrizione "Modifica dati utente"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     Write-Host "Dati attuali:"
     Write-Host "  DisplayName : $($fresh.DisplayName)"
     Write-Host "  GivenName   : $($fresh.GivenName)"
@@ -1142,6 +1175,11 @@ function Invoke-SpostaUtenteOU {
     Write-LogScelta -Percorso "1.3.8" -Descrizione "Sposta utente in OU"
 
     $fresh = Find-ADUserInRoot -Identity $Utente.SamAccountName
+    if (-not $fresh) {
+        Write-Host "[ERRORE] Utente non trovato o non più disponibile. Nessuna modifica eseguita." -ForegroundColor Red
+        Write-SessionLog -Testo "OPERAZIONE BLOCCATA: utente '$($Utente.SamAccountName)' non trovato al controllo aggiornato."
+        return
+    }
     Write-Host "OU attuale: $($fresh.DistinguishedName)"
     $ouDest = Select-OUByName -Prompt "Selezionare la OU di destinazione"
     if ($null -eq $ouDest) {
