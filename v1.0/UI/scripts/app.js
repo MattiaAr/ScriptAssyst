@@ -9,3 +9,14 @@ function guided(){return '<section class="panel guided-card"><div class="step-co
 function drawUsers(q){const rows=state.users.filter(u=>Object.values(u).some(v=>v.toLowerCase().includes(q.toLowerCase())));document.querySelector('#user-rows').innerHTML=rows.map(u=>'<tr><td>'+u.name+'</td><td>'+u.sam+'</td><td>'+u.department+'</td><td>'+u.ou+'</td><td><span class="pill '+(u.status==='Abilitato'?'ok':'warn')+'">'+u.status+'</span></td></tr>').join('')||'<tr><td colspan="5" class="empty">Nessun utente corrispondente.</td></tr>'}
 function render(){document.querySelector('#page-title').textContent=state.mode==='guided'?'Modalità guidata':pages[state.page];content.innerHTML=state.mode==='guided'?guided():state.page==='overview'?overview():state.page==='users'?users():simplePage(state.page);content.querySelectorAll('[data-page]').forEach(el=>el.addEventListener('click',()=>{state.page=el.dataset.page;state.mode='dashboard';document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x.dataset.mode===state.mode));render()}));if(state.page==='users'&&state.mode==='dashboard'){drawUsers('');document.querySelector('#user-search').addEventListener('input',e=>drawUsers(e.target.value))}}
 document.querySelectorAll('.mode').forEach(b=>b.addEventListener('click',()=>{state.mode=b.dataset.mode;document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x===b));render()}));document.querySelectorAll('.nav-item').forEach(b=>b.addEventListener('click',()=>{state.page=b.dataset.page;state.mode='dashboard';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x.dataset.mode===state.mode));render()}));render();
+
+// Bridge desktop: il browser normale resta in modalità demo, WebView2 interroga solo operazioni consentite.
+if (window.chrome && window.chrome.webview) {
+  window.chrome.webview.addEventListener('message', event => {
+    const result = event.data;
+    const label = document.querySelector('#connection-label');
+    if (result && result.status && label) label.textContent = 'Backend locale · ' + result.status.mode;
+    if (result && result.error && label) label.textContent = 'Backend non disponibile';
+  });
+  window.chrome.webview.postMessage({ operation: 'status' });
+}
