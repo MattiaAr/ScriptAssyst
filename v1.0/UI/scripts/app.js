@@ -20,3 +20,51 @@ if (window.chrome && window.chrome.webview) {
   });
   window.chrome.webview.postMessage({ operation: 'status' });
 }
+
+
+// Active backend integration: user listing is requested only through the desktop host.
+// The ordinary browser intentionally retains demo data.
+const demoDrawUsers = drawUsers;
+function drawUsers(q) {
+  const rows = document.querySelector('#user-rows');
+  if (!rows) return;
+  if (window.chrome && window.chrome.webview) {
+    rows.innerHTML = '<tr><td colspan="5" class="empty">Caricamento utenti da Active Directory…</td></tr>';
+    window.chrome.webview.postMessage({ operation: 'users', query: q || '' });
+    return;
+  }
+  demoDrawUsers(q);
+}
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+}
+if (window.chrome && window.chrome.webview) {
+  window.chrome.webview.addEventListener('message', event => {
+    const result = event.data;
+    if (!result || result.operation !== 'users') return;
+    const rows = document.querySelector('#user-rows');
+    if (!rows) return;
+    if (!result.success) {
+      rows.innerHTML = '<tr><td colspan="5" class="empty">Errore durante la consultazione: ' + escapeHtml(result.error || 'errore non specificato') + '</td></tr>';
+      return;
+    }
+    const users = Array.isArray(result.data) ? result.data : [];
+    if (!users.length) {
+      rows.innerHTML = '<tr><td colspan="5" class="empty">Nessun utente trovato o nessun risultato restituito.</td></tr>';
+      return;
+    }
+    rows.innerHTML = users.map(user => {
+      const enabled = user.Enabled === true;
+      const name = escapeHtml(user.Name || '');
+      const sam = escapeHtml(user.SamAccountName || '');
+      const department = escapeHtml(user.Department || '—');
+      const dn = escapeHtml(user.DistinguishedName || '—');
+      const status = enabled ? 'Abilitato' : 'Disabilitato';
+      return '<tr><td>' + name + '</td><td>' + sam + '</td><td>' + department +
+        '</td><td>' + dn + '</td><td><span class="pill ' + (enabled ? 'ok' : 'warn') +
+        '">' + status + '</span></td></tr>';
+    }).join('');
+  });
+}
