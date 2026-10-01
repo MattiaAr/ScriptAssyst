@@ -15,7 +15,7 @@ if (window.chrome && window.chrome.webview) {
   window.chrome.webview.addEventListener('message', event => {
     const result = event.data;
     const label = document.querySelector('#connection-label');
-    if (result && result.status && label) label.textContent = 'Backend locale · ' + result.status.mode;
+    if (result && result.mode && label) label.textContent = 'Backend locale · ' + result.mode;
     if (result && result.error && label) label.textContent = 'Backend non disponibile';
   });
   window.chrome.webview.postMessage({ operation: 'status' });
