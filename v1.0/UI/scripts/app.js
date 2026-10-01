@@ -68,3 +68,32 @@ if (window.chrome && window.chrome.webview) {
     }).join('');
   });
 }
+
+
+// Reflect connection state and real dashboard counters returned by the backend.
+if (window.chrome && window.chrome.webview) {
+  window.chrome.webview.addEventListener('message', event => {
+    const result = event.data;
+    if (!result || !result.success) return;
+    if (result.operation === 'status' && result.data) {
+      const status = result.data;
+      const label = document.querySelector('#connection-label');
+      const environment = document.querySelector('.environment');
+      if (label) label.textContent = status.adConnected ? 'AD · ' + (status.domain || 'connesso') : 'Backend · offline';
+      if (environment) environment.lastChild.textContent = status.adConnected ? ' Active Directory' : ' Connessione AD assente';
+      window.chrome.webview.postMessage({ operation: 'dashboard' });
+    }
+    if (result.operation === 'dashboard') {
+      const metrics = result.data && result.data.metrics;
+      const values = document.querySelectorAll('.metric-value');
+      if (metrics && values.length >= 4) {
+        values[0].textContent = metrics.users ?? '—';
+        values[1].textContent = metrics.groups ?? '—';
+        values[2].textContent = metrics.ous ?? '—';
+        values[3].textContent = metrics.gpos ?? '—';
+      } else if (values.length >= 4) {
+        values.forEach(value => value.textContent = '—');
+      }
+    }
+  });
+}
