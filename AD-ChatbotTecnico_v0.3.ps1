@@ -654,7 +654,7 @@ Cosa si desidera fare?
 
 function Invoke-RicercaEAzioniUtente {
     Write-LogScelta -Percorso "1.1" -Descrizione "Ricerca utente esistente"
-    $identity = Read-InputAnnullabile -Prompt "Inserire nome utente (ES: c.michelini oppure m.rossi@hyperleonet.it)"
+    $identity = Read-InputAnnullabile -Prompt "Inserire nome utente (ES: c.michelini oppure m.rossi@dominio.it)"
     if ($null -eq $identity) { return }
     Write-LogInput -Etichetta "Nome utente ricercato" -Valore $identity
 
