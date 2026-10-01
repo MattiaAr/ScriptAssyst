@@ -92,7 +92,7 @@ function Get-ScriptAssystGpos {
 function Get-ScriptAssystScheduledTasks {
     [CmdletBinding()]
     param([string]$Query = '')
-    $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' })
+    $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskPath -notlike '\Microsoft\*' })
     if (-not [string]::IsNullOrWhiteSpace($Query)) {
         $tasks = @($tasks | Where-Object { $_.TaskName -like "*$Query*" -or $_.TaskPath -like "*$Query*" })
     }
