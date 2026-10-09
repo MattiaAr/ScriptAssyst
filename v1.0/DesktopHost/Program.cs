@@ -22,7 +22,7 @@ internal sealed class MainForm : Form
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
-        "status", "dashboard", "users", "groups", "ous", "gpos", "tasks"
+        "status", "dashboard", "users", "groups", "ous", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword"
     };
 
     public MainForm()
@@ -77,6 +77,7 @@ internal sealed class MainForm : Form
             var psi = new ProcessStartInfo("powershell.exe")
             {
                 UseShellExecute = false,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
@@ -87,14 +88,13 @@ internal sealed class MainForm : Form
             psi.ArgumentList.Add("RemoteSigned");
             psi.ArgumentList.Add("-File");
             psi.ArgumentList.Add(script);
-            psi.ArgumentList.Add("-Operation");
-            psi.ArgumentList.Add(operation);
-            psi.ArgumentList.Add("-Query");
-            psi.ArgumentList.Add(query);
+            psi.ArgumentList.Add("-ReadRequestFromStdin");
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Impossibile avviare PowerShell.");
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
+            await process.StandardInput.WriteAsync(e.WebMessageAsJson);
+            process.StandardInput.Close();
             await process.WaitForExitAsync();
             var output = await outputTask;
             var error = await errorTask;
