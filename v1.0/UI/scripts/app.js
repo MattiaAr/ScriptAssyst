@@ -25,12 +25,12 @@ function escapeHtml(value) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
 }
-function send(operation, query = '') {
+function send(operation, query = '', extra = {}) {
   if (!hasBridge) {
     showBridgeError();
     return;
   }
-  window.chrome.webview.postMessage({ operation, query });
+  window.chrome.webview.postMessage({ operation, query, ...extra });
 }
 function showBridgeError() {
   const label = document.querySelector('#connection-label');
@@ -78,8 +78,8 @@ function overview() {
 const pageConfig = {
   users: {
     operation: 'users', title: 'Utenti', search: 'Cerca per nome, account o reparto…',
-    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['DistinguishedName', 'Distinguished name'], ['Enabled', 'Stato']],
-    render: row => [row.Name, row.SamAccountName, row.Department || '—', row.DistinguishedName, row.Enabled === true ? 'Abilitato' : 'Disabilitato']
+    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['DistinguishedName', 'Distinguished name'], ['Enabled', 'Stato'], ['Actions', 'Azioni']],
+    render: row => [row.Name, row.SamAccountName, row.Department || '—', row.DistinguishedName, row.Enabled === true ? 'Abilitato' : 'Disabilitato', row]
   },
   groups: {
     operation: 'groups', title: 'Gruppi', search: 'Cerca per nome, account o descrizione…',
@@ -128,6 +128,16 @@ function tablePage(page) {
   } else {
     body = rows.map(row => '<tr>' + config.render(row).map((value, index) => {
       const key = config.columns[index][0];
+      if (page === 'users' && key === 'Actions') {
+        const identity = escapeHtml(row.DistinguishedName || row.SamAccountName || '');
+        const stateAction = row.Enabled === true
+          ? '<button class="text-button" data-user-action="disableUser" data-identity="' + identity + '">Disabilita</button>'
+          : '<button class="text-button" data-user-action="enableUser" data-identity="' + identity + '">Abilita</button>';
+        const resetAction = row.Enabled === true
+          ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
+          : '<span class="panel-sub">Reset non disponibile</span>';
+        return '<td>' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
+      }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
         (page === 'ous' && key === 'ProtectedFromAccidentalDeletion');
@@ -147,6 +157,32 @@ function tablePage(page) {
     '<div class="table-wrap"><table class="data-table"><thead><tr>' + header +
     '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     (loading && data !== null ? '<div class="panel-sub">Aggiornamento in corso…</div>' : '');
+}
+function runUserAction(operation, identity) {
+  const user = (state.data.users || []).find(item => (item.DistinguishedName || item.SamAccountName) === identity);
+  if (!user) { alert('Utente non trovato nei dati correnti. Aggiorna la tabella e riprova.'); return; }
+  const account = user.SamAccountName || user.Name || identity;
+  const payload = { operation, identity };
+  if (operation === 'disableUser') {
+    if (!confirm('Confermi la disabilitazione dell’account ' + account + '? L’accesso dell’utente verrà bloccato.')) return;
+  } else if (operation === 'enableUser') {
+    if (!confirm('Confermi la riabilitazione dell’account ' + account + '?')) return;
+  } else if (operation === 'moveUser') {
+    const destinationOU = prompt('Inserisci il Distinguished Name completo della OU di destinazione.\nEsempio: OU=RepartoIT,OU=Utenti,DC=homelab,DC=local');
+    if (!destinationOU || !destinationOU.trim()) return;
+    if (!confirm('Spostare ' + account + ' in questa OU?\n' + destinationOU.trim())) return;
+    payload.destinationOU = destinationOU.trim();
+  } else if (operation === 'resetPassword') {
+    if (user.Enabled !== true) { alert('Il reset password è consentito solo agli account abilitati.'); return; }
+    const password = prompt('Inserisci la nuova password per ' + account + '. La policy del dominio verrà applicata da Active Directory.');
+    if (password === null || password.length === 0) return;
+    const repeated = prompt('Conferma la nuova password.');
+    if (password !== repeated) { alert('Le password non coincidono. Nessuna modifica eseguita.'); return; }
+    payload.password = password;
+    payload.changePasswordAtLogon = confirm('Richiedere all’utente di cambiare password al prossimo accesso?');
+    if (!confirm('Confermi il reset della password per ' + account + '?')) return;
+  } else return;
+  send(operation, state.queries.users || '', payload);
 }
 function guided() {
   return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO</div><h2>Che cosa vuoi consultare?</h2>' +
@@ -170,6 +206,7 @@ function render() {
     if (state.page === 'overview') send('dashboard');
     else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
   }));
+  content.querySelectorAll('[data-user-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.userAction, button.dataset.identity)));
   const search = document.querySelector('#page-search');
   if (search) search.addEventListener('input', event => {
     const page = state.page;
@@ -196,6 +233,17 @@ function handleMessage(event) {
       state.errors.dashboard = result.error || 'Impossibile verificare Active Directory.';
       showBridgeError();
       render();
+    }
+    return;
+  }
+  if (['disableUser', 'enableUser', 'moveUser', 'resetPassword'].includes(result.operation)) {
+    if (result.success && result.data) {
+      alert(result.data.message || 'Operazione completata.');
+      state.data.users = null;
+      requestPage('users', state.queries.users || '');
+      send('dashboard');
+    } else {
+      alert('Operazione non completata: ' + (result.error || 'errore non specificato'));
     }
     return;
   }
