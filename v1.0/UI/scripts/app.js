@@ -1,99 +1,245 @@
-const state={page:'overview',mode:'dashboard',users:[{name:'Alessia Conti',sam:'aconti',department:'IT',ou:'OU=Tecnici,DC=demo,DC=local',status:'Abilitato'},{name:'Luca Ferri',sam:'lferri',department:'Amministrazione',ou:'OU=Uffici,DC=demo,DC=local',status:'Abilitato'},{name:'Marta Riva',sam:'mriva',department:'Risorse Umane',ou:'OU=Uffici,DC=demo,DC=local',status:'Disabilitato'},{name:'Paolo Greco',sam:'pgreco',department:'IT',ou:'OU=Tecnici,DC=demo,DC=local',status:'Abilitato'},{name:'Sara Villa',sam:'svilla',department:'Logistica',ou:'OU=Operativi,DC=demo,DC=local',status:'Abilitato'}]};
-const pages={overview:'Panoramica',users:'Utenti',groups:'Gruppi',ous:'Unità organizzative',gpo:'Criteri GPO',tasks:'Attività pianificate'};const content=document.querySelector('#app-content');
-function metric(a,b,c,d){return '<article class="metric"><div class="metric-top"><span>'+a+'</span><span class="metric-icon">'+d+'</span></div><div class="metric-value">'+b+'</div><div class="metric-note">'+c+'</div></article>'}
-function overview(){return '<div class="welcome"><div><h2>Buongiorno, Mattia</h2><p>Riepilogo dell’ambiente e accesso alle operazioni più utilizzate.</p></div><span class="date-chip">AMBIENTE DIMOSTRATIVO</span></div><div class="metrics">'+metric('Utenti censiti','1.284','Directory di esempio','♙')+metric('Gruppi','86','Oggetti dimostrativi','♧')+metric('Unità organizzative','24','Struttura simulata','▤')+metric('GPO','32','Criteri di esempio','⚙')+'</div><div class="columns"><section class="panel"><div class="panel-head"><div><h3>Attività recenti</h3><div class="panel-sub">Eventi simulati a scopo dimostrativo</div></div><button class="text-button" data-page="users">Apri utenti →</button></div><div class="activity"><div class="activity-row"><div class="activity-icon">⌕</div><div class="activity-copy"><strong>Ricerca utente completata</strong><small>aconti · Unità IT</small></div><span class="activity-time">09:42</span></div><div class="activity-row"><div class="activity-icon">♙</div><div class="activity-copy"><strong>Account disabilitato</strong><small>mriva · Operazione dimostrativa</small></div><span class="activity-time">09:18</span></div><div class="activity-row"><div class="activity-icon">⚙</div><div class="activity-copy"><strong>Analisi criteri GPO</strong><small>Workstation-Base · Nessuna modifica</small></div><span class="activity-time">Ieri</span></div></div></section><section class="panel"><div class="panel-head"><div><h3>Accesso rapido</h3><div class="panel-sub">Seleziona un’area di lavoro</div></div></div><div class="quick-grid"><button class="quick" data-page="users"><span>♙</span><strong>Gestione utenti</strong><small>Cerca e consulta account</small></button><button class="quick" data-page="groups"><span>♧</span><strong>Gruppi</strong><small>Consulta appartenenze</small></button><button class="quick" data-page="ous"><span>▤</span><strong>Esplora OU</strong><small>Visualizza la struttura</small></button><button class="quick" data-page="gpo"><span>⚙</span><strong>Analisi GPO</strong><small>Consulta i criteri</small></button></div><div class="notice">Modalità prototipo: i dati sono fittizi. Nessuna operazione viene eseguita su Active Directory.</div></section></div>'}
-function users(){return '<div class="page-toolbar"><div class="panel-sub">Elenco di account fittizi per validare ricerca e visualizzazione.</div><input class="search" id="user-search" placeholder="Cerca per nome, account o reparto…" aria-label="Cerca utenti"></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Nome</th><th>Account</th><th>Reparto</th><th>Unità organizzativa</th><th>Stato</th></tr></thead><tbody id="user-rows"></tbody></table></div><div class="notice">Consultazione simulata. Ricerca e modifiche AD reali non sono ancora collegate.</div>'}
-const records={groups:[['Domain Admins','Gruppo di sicurezza','12'],['Helpdesk Tier 1','Gruppo di sicurezza','8'],['HR-Staff','Gruppo di sicurezza','24']],ous:[['Tecnici','OU=Tecnici,DC=demo,DC=local','42'],['Uffici','OU=Uffici,DC=demo,DC=local','108'],['Operativi','OU=Operativi,DC=demo,DC=local','73']],gpo:[['Workstation-Base','Collegata','OU=Workstations'],['Password-Policy','Collegata','Dominio'],['Helpdesk-Restrictions','Non collegata','—']],tasks:[['AD-HealthCheck','Giornaliera · 06:00','Pronta'],['Log-Cleanup','Settimanale · Domenica','Pronta'],['Inventory-Sync','Ogni 4 ore','Disabilitata']]};
-function simplePage(p){const c={groups:['Gruppi','Nome','Tipo','Membri'],ous:['OU','Nome OU','Percorso','Oggetti'],gpo:['GPO','Nome criterio','Collegamento','Destinazione'],tasks:['Attività','Attività','Pianificazione','Stato']}[p];return '<div class="page-toolbar"><div class="panel-sub">Dati dimostrativi · sola visualizzazione</div></div><div class="table-wrap"><table class="data-table"><thead><tr>'+c.slice(1).map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>'+records[p].map(r=>'<tr>'+r.map((v,i)=>'<td>'+(i===r.length-1&&p==='tasks'?'<span class="pill '+(v==='Pronta'?'ok':'warn')+'">'+v+'</span>':v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div><div class="notice">I dati mostrati non provengono da un dominio reale. Le operazioni sono disabilitate.</div>'}
-function guided(){return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO · INTRODUZIONE</div><h2>Che cosa vuoi fare?</h2><p>La modalità guidata accompagna l’operatore attraverso procedure controllate. In questo prototipo puoi esplorare i flussi senza modificare dati reali.</p><div class="workflow-list"><button class="workflow" data-page="users"><b>01</b><span><strong>Consultare un account</strong><small>Ricerca e visualizzazione dei dettagli</small></span></button><button class="workflow" data-page="groups"><b>02</b><span><strong>Verificare un gruppo</strong><small>Informazioni e appartenenze</small></span></button><button class="workflow" data-page="ous"><b>03</b><span><strong>Esplorare la struttura OU</strong><small>Individuazione di unità e oggetti</small></span></button><button class="workflow" data-page="gpo"><b>04</b><span><strong>Analizzare un criterio GPO</strong><small>Criteri e collegamenti</small></span></button></div><button class="primary" data-page="overview">Torna alla panoramica</button></section>'}
-function drawUsers(q){const rows=state.users.filter(u=>Object.values(u).some(v=>v.toLowerCase().includes(q.toLowerCase())));document.querySelector('#user-rows').innerHTML=rows.map(u=>'<tr><td>'+u.name+'</td><td>'+u.sam+'</td><td>'+u.department+'</td><td>'+u.ou+'</td><td><span class="pill '+(u.status==='Abilitato'?'ok':'warn')+'">'+u.status+'</span></td></tr>').join('')||'<tr><td colspan="5" class="empty">Nessun utente corrispondente.</td></tr>'}
-function render(){document.querySelector('#page-title').textContent=state.mode==='guided'?'Modalità guidata':pages[state.page];content.innerHTML=state.mode==='guided'?guided():state.page==='overview'?overview():state.page==='users'?users():simplePage(state.page);content.querySelectorAll('[data-page]').forEach(el=>el.addEventListener('click',()=>{state.page=el.dataset.page;state.mode='dashboard';document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x.dataset.mode===state.mode));render()}));if(state.page==='users'&&state.mode==='dashboard'){drawUsers('');document.querySelector('#user-search').addEventListener('input',e=>drawUsers(e.target.value))}}
-document.querySelectorAll('.mode').forEach(b=>b.addEventListener('click',()=>{state.mode=b.dataset.mode;document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x===b));render()}));document.querySelectorAll('.nav-item').forEach(b=>b.addEventListener('click',()=>{state.page=b.dataset.page;state.mode='dashboard';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active',x.dataset.mode===state.mode));render()}));render();
+const state = {
+  page: 'overview',
+  mode: 'dashboard',
+  status: null,
+  metrics: null,
+  data: { users: null, groups: null, ous: null, gpos: null, tasks: null },
+  loading: {},
+  errors: {},
+  queries: { users: '', groups: '', ous: '', gpos: '', tasks: '' }
+};
 
-// Bridge desktop: il browser normale resta in modalità demo, WebView2 interroga solo operazioni consentite.
-if (window.chrome && window.chrome.webview) {
-  window.chrome.webview.addEventListener('message', event => {
-    const result = event.data;
-    const label = document.querySelector('#connection-label');
-    if (result && result.mode && label) label.textContent = 'Backend locale · ' + result.mode;
-    if (result && result.error && label) label.textContent = 'Backend non disponibile';
-  });
-  window.chrome.webview.postMessage({ operation: 'status' });
-}
+const pages = {
+  overview: 'Panoramica',
+  users: 'Utenti',
+  groups: 'Gruppi',
+  ous: 'Unità organizzative',
+  gpo: 'Criteri GPO',
+  tasks: 'Attività pianificate'
+};
+const content = document.querySelector('#app-content');
+const hasBridge = Boolean(window.chrome && window.chrome.webview);
 
-
-// Active backend integration: user listing is requested only through the desktop host.
-// The ordinary browser intentionally retains demo data.
-const demoDrawUsers = drawUsers;
-function drawUsers(q) {
-  const rows = document.querySelector('#user-rows');
-  if (!rows) return;
-  if (window.chrome && window.chrome.webview) {
-    rows.innerHTML = '<tr><td colspan="5" class="empty">Caricamento utenti da Active Directory…</td></tr>';
-    window.chrome.webview.postMessage({ operation: 'users', query: q || '' });
-    return;
-  }
-  demoDrawUsers(q);
-}
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
 }
-if (window.chrome && window.chrome.webview) {
-  window.chrome.webview.addEventListener('message', event => {
-    const result = event.data;
-    if (!result || result.operation !== 'users') return;
-    const rows = document.querySelector('#user-rows');
-    if (!rows) return;
-    if (!result.success) {
-      rows.innerHTML = '<tr><td colspan="5" class="empty">Errore durante la consultazione: ' + escapeHtml(result.error || 'errore non specificato') + '</td></tr>';
-      return;
-    }
-    const users = Array.isArray(result.data) ? result.data : [];
-    if (!users.length) {
-      rows.innerHTML = '<tr><td colspan="5" class="empty">Nessun utente trovato o nessun risultato restituito.</td></tr>';
-      return;
-    }
-    rows.innerHTML = users.map(user => {
-      const enabled = user.Enabled === true;
-      const name = escapeHtml(user.Name || '');
-      const sam = escapeHtml(user.SamAccountName || '');
-      const department = escapeHtml(user.Department || '—');
-      const dn = escapeHtml(user.DistinguishedName || '—');
-      const status = enabled ? 'Abilitato' : 'Disabilitato';
-      return '<tr><td>' + name + '</td><td>' + sam + '</td><td>' + department +
-        '</td><td>' + dn + '</td><td><span class="pill ' + (enabled ? 'ok' : 'warn') +
-        '">' + status + '</span></td></tr>';
-    }).join('');
+function send(operation, query = '') {
+  if (!hasBridge) {
+    showBridgeError();
+    return;
+  }
+  window.chrome.webview.postMessage({ operation, query });
+}
+function showBridgeError() {
+  const label = document.querySelector('#connection-label');
+  if (label) label.textContent = 'Host desktop non disponibile';
+  const environment = document.querySelector('.environment');
+  if (environment) environment.innerHTML = '<span class="status-dot"></span> Host desktop non disponibile';
+}
+function metric(label, value, note, symbol) {
+  return '<article class="metric"><div class="metric-top"><span>' + escapeHtml(label) +
+    '</span><span class="metric-icon">' + symbol + '</span></div><div class="metric-value">' +
+    escapeHtml(value ?? '—') + '</div><div class="metric-note">' + escapeHtml(note) + '</div></article>';
+}
+function overview() {
+  const status = state.status;
+  const metrics = state.metrics;
+  const connected = Boolean(status && status.adConnected);
+  const domain = connected ? status.domain : 'Dominio non connesso';
+  const modeLabel = connected ? 'ACTIVE DIRECTORY · ' + domain : 'CONNESSIONE AD NON DISPONIBILE';
+  return '<div class="welcome"><div><h2>Panoramica ambiente</h2><p>' +
+    escapeHtml(connected ? 'Controller di dominio: ' + (status.domainController || 'non indicato') : 'Metriche disponibili dopo la connessione ad Active Directory.') +
+    '</p></div><span class="date-chip">' + escapeHtml(modeLabel) + '</span></div>' +
+    '<div class="metrics">' +
+    metric('Utenti censiti', metrics && metrics.users, 'Account restituiti da Active Directory', '♙') +
+    metric('Gruppi', metrics && metrics.groups, 'Gruppi del dominio', '♧') +
+    metric('Unità organizzative', metrics && metrics.ous, 'OU del dominio', '▤') +
+    metric('GPO', metrics && metrics.gpos, 'Criteri di gruppo rilevati', '⚙') +
+    '</div><div class="columns">' +
+    '<section class="panel"><div class="panel-head"><div><h3>Stato connessione</h3><div class="panel-sub">Informazioni restituite dal backend</div></div></div>' +
+    '<div class="activity"><div class="activity-row"><div class="activity-icon">●</div><div class="activity-copy"><strong>' +
+    escapeHtml(connected ? 'Active Directory connesso' : 'Active Directory non disponibile') +
+    '</strong><small>' + escapeHtml(status && status.operator ? 'Operatore: ' + status.operator : (status && status.message) || 'In attesa del backend') +
+    '</small></div><span class="pill ' + (connected ? 'ok' : 'warn') + '">' + (connected ? 'Online' : 'Offline') + '</span></div>' +
+    '<div class="activity-row"><div class="activity-icon">⌘</div><div class="activity-copy"><strong>Modulo ActiveDirectory</strong><small>Disponibilità rilevata dal backend</small></div><span class="pill ' +
+    (status && status.activeDirectoryModule ? 'ok' : 'warn') + '">' + (status && status.activeDirectoryModule ? 'Disponibile' : 'Non disponibile') + '</span></div>' +
+    '<div class="activity-row"><div class="activity-icon">⚙</div><div class="activity-copy"><strong>Modulo GroupPolicy</strong><small>Disponibilità rilevata dal backend</small></div><span class="pill ' +
+    (status && status.groupPolicyModule ? 'ok' : 'warn') + '">' + (status && status.groupPolicyModule ? 'Disponibile' : 'Non disponibile') + '</span></div></div>' +
+    (state.errors.dashboard ? '<div class="notice">' + escapeHtml(state.errors.dashboard) + '</div>' : '') +
+    '</section><section class="panel"><div class="panel-head"><div><h3>Aree di lavoro</h3><div class="panel-sub">Consulta i dati correnti del dominio o del computer</div></div></div>' +
+    '<div class="quick-grid"><button class="quick" data-page="users"><span>♙</span><strong>Utenti</strong><small>Account AD</small></button>' +
+    '<button class="quick" data-page="groups"><span>♧</span><strong>Gruppi</strong><small>Gruppi e membri</small></button>' +
+    '<button class="quick" data-page="ous"><span>▤</span><strong>Unità organizzative</strong><small>Struttura OU</small></button>' +
+    '<button class="quick" data-page="gpo"><span>⚙</span><strong>Criteri GPO</strong><small>Criteri di gruppo</small></button></div>' +
+    '<div class="panel-sub" style="margin-top:14px">I dati visualizzati provengono dal backend; nessun dato dimostrativo viene usato come fallback.</div></section></div>';
+}
+const pageConfig = {
+  users: {
+    operation: 'users', title: 'Utenti', search: 'Cerca per nome, account o reparto…',
+    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['DistinguishedName', 'Distinguished name'], ['Enabled', 'Stato']],
+    render: row => [row.Name, row.SamAccountName, row.Department || '—', row.DistinguishedName, row.Enabled === true ? 'Abilitato' : 'Disabilitato']
+  },
+  groups: {
+    operation: 'groups', title: 'Gruppi', search: 'Cerca per nome, account o descrizione…',
+    columns: [['Name', 'Nome'], ['GroupCategory', 'Categoria'], ['GroupScope', 'Ambito'], ['MemberCount', 'Membri'], ['Description', 'Descrizione']],
+    render: row => [row.Name, row.GroupCategory, row.GroupScope, row.MemberCount, row.Description || '—']
+  },
+  ous: {
+    operation: 'ous', title: 'Unità organizzative', search: 'Cerca per nome OU…',
+    columns: [['Name', 'Nome OU'], ['DistinguishedName', 'Percorso'], ['Description', 'Descrizione'], ['ProtectedFromAccidentalDeletion', 'Protezione eliminazione']],
+    render: row => [row.Name, row.DistinguishedName, row.Description || '—', row.ProtectedFromAccidentalDeletion ? 'Attiva' : 'Non attiva']
+  },
+  gpo: {
+    operation: 'gpos', title: 'Criteri GPO', search: 'Cerca per nome criterio…',
+    columns: [['DisplayName', 'Nome criterio'], ['GpoStatus', 'Stato'], ['ModificationTime', 'Ultima modifica'], ['Owner', 'Proprietario'], ['Description', 'Descrizione']],
+    render: row => [row.DisplayName, row.GpoStatus, row.ModificationTime ? new Date(row.ModificationTime).toLocaleString('it-IT') : '—', row.Owner, row.Description || '—']
+  },
+  tasks: {
+    operation: 'tasks', title: 'Attività pianificate', search: 'Cerca per nome o percorso…',
+    columns: [['TaskName', 'Attività'], ['TaskPath', 'Percorso'], ['State', 'Stato'], ['Author', 'Autore'], ['Description', 'Descrizione']],
+    render: row => [row.TaskName, row.TaskPath, row.State, row.Author || '—', row.Description || '—']
+  }
+};
+function requestPage(page, query = '') {
+  const config = pageConfig[page];
+  if (!config) return;
+  state.loading[page] = true;
+  state.errors[page] = null;
+  render();
+  send(config.operation, query);
+}
+function tablePage(page) {
+  const config = pageConfig[page];
+  const query = state.queries[page] || '';
+  const data = state.data[page];
+  const error = state.errors[page];
+  const loading = state.loading[page];
+  const rows = Array.isArray(data) ? data : [];
+  const header = config.columns.map(col => '<th>' + escapeHtml(col[1]) + '</th>').join('');
+  let body;
+  if (loading && data === null) {
+    body = '<tr><td colspan="' + config.columns.length + '" class="empty">Caricamento dati dal backend…</td></tr>';
+  } else if (error) {
+    body = '<tr><td colspan="' + config.columns.length + '" class="empty">Errore: ' + escapeHtml(error) + '</td></tr>';
+  } else if (!rows.length) {
+    body = '<tr><td colspan="' + config.columns.length + '" class="empty">Nessun risultato restituito dal backend.</td></tr>';
+  } else {
+    body = rows.map(row => '<tr>' + config.render(row).map((value, index) => {
+      const key = config.columns[index][0];
+      const statusCell = (page === 'users' && key === 'Enabled') ||
+        (page === 'tasks' && key === 'State') ||
+        (page === 'ous' && key === 'ProtectedFromAccidentalDeletion');
+      if (statusCell) {
+        let text = String(value ?? '—');
+        let cls = 'pill';
+        if (text === 'Abilitato' || text === 'Ready' || text === 'Running' || text === 'Attiva') cls += ' ok';
+        else if (text === 'Disabilitato' || text === 'Disabled' || text === 'Non attiva') cls += ' warn';
+        return '<td><span class="' + cls + '">' + escapeHtml(text) + '</span></td>';
+      }
+      return '<td>' + escapeHtml(value ?? '—') + '</td>';
+    }).join('') + '</tr>').join('');
+  }
+  return '<div class="page-toolbar"><div class="panel-sub">' + escapeHtml(config.title) +
+    ' · dati ricevuti dal backend</div><input class="search" id="page-search" value="' + escapeHtml(query) +
+    '" placeholder="' + escapeHtml(config.search) + '" aria-label="' + escapeHtml(config.search) + '"></div>' +
+    '<div class="table-wrap"><table class="data-table"><thead><tr>' + header +
+    '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+    (loading && data !== null ? '<div class="panel-sub">Aggiornamento in corso…</div>' : '');
+}
+function guided() {
+  return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO</div><h2>Che cosa vuoi consultare?</h2>' +
+    '<p>Seleziona un’area per leggere i dati restituiti dal backend. In questa versione le operazioni di modifica ad Active Directory non sono abilitate.</p>' +
+    '<div class="workflow-list"><button class="workflow" data-page="users"><b>01</b><span><strong>Consultare un account</strong><small>Utenti e stato account</small></span></button>' +
+    '<button class="workflow" data-page="groups"><b>02</b><span><strong>Verificare un gruppo</strong><small>Categoria, ambito e numero di membri</small></span></button>' +
+    '<button class="workflow" data-page="ous"><b>03</b><span><strong>Esplorare le OU</strong><small>Percorsi e protezione da eliminazione</small></span></button>' +
+    '<button class="workflow" data-page="gpo"><b>04</b><span><strong>Analizzare una GPO</strong><small>Stato, proprietario e ultima modifica</small></span></button></div>' +
+    '<button class="primary" data-page="overview">Torna alla panoramica</button></section>';
+}
+function render() {
+  document.querySelector('#page-title').textContent = state.mode === 'guided' ? 'Modalità guidata' : pages[state.page];
+  content.innerHTML = state.mode === 'guided' ? guided() :
+    state.page === 'overview' ? overview() : tablePage(state.page);
+  content.querySelectorAll('[data-page]').forEach(el => el.addEventListener('click', () => {
+    state.page = el.dataset.page;
+    state.mode = 'dashboard';
+    document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.page === state.page));
+    document.querySelectorAll('.mode').forEach(x => x.classList.toggle('active', x.dataset.mode === state.mode));
+    render();
+    if (state.page === 'overview') send('dashboard');
+    else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
+  }));
+  const search = document.querySelector('#page-search');
+  if (search) search.addEventListener('input', event => {
+    const page = state.page;
+    state.queries[page] = event.target.value;
+    if (state.searchTimer) clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(() => requestPage(page, state.queries[page]), 250);
   });
 }
-
-
-// Reflect connection state and real dashboard counters returned by the backend.
-if (window.chrome && window.chrome.webview) {
-  window.chrome.webview.addEventListener('message', event => {
-    const result = event.data;
-    if (!result || !result.success) return;
-    if (result.operation === 'status' && result.data) {
-      const status = result.data;
+function handleMessage(event) {
+  const result = event.data;
+  if (!result || !result.operation) return;
+  if (result.operation === 'status') {
+    if (result.success && result.data) {
+      state.status = result.data;
+      const connected = Boolean(result.data.adConnected);
       const label = document.querySelector('#connection-label');
       const environment = document.querySelector('.environment');
-      if (label) label.textContent = status.adConnected ? 'AD · ' + (status.domain || 'connesso') : 'Backend · offline';
-      if (environment) environment.lastChild.textContent = status.adConnected ? ' Active Directory' : ' Connessione AD assente';
-      window.chrome.webview.postMessage({ operation: 'dashboard' });
+      if (label) label.textContent = connected ? 'AD · ' + (result.data.domain || 'connesso') : 'Active Directory offline';
+      if (environment) environment.innerHTML = '<span class="status-dot"></span> ' + escapeHtml(connected ? result.data.domain : 'Connessione AD assente');
+      render();
+      send('dashboard');
+    } else {
+      state.status = result.data || { adConnected: false, message: result.error || 'Connessione non disponibile' };
+      state.errors.dashboard = result.error || 'Impossibile verificare Active Directory.';
+      showBridgeError();
+      render();
     }
-    if (result.operation === 'dashboard') {
-      const metrics = result.data && result.data.metrics;
-      const values = document.querySelectorAll('.metric-value');
-      if (metrics && values.length >= 4) {
-        values[0].textContent = metrics.users ?? '—';
-        values[1].textContent = metrics.groups ?? '—';
-        values[2].textContent = metrics.ous ?? '—';
-        values[3].textContent = metrics.gpos ?? '—';
-      } else if (values.length >= 4) {
-        values.forEach(value => value.textContent = '—');
-      }
+    return;
+  }
+  if (result.operation === 'dashboard') {
+    if (result.success && result.data) {
+      state.status = result.data.status || state.status;
+      state.metrics = result.data.metrics || null;
+      state.errors.dashboard = result.data.message || null;
+    } else {
+      state.errors.dashboard = result.error || 'Impossibile caricare le metriche.';
     }
-  });
+    render();
+    return;
+  }
+  const page = Object.keys(pageConfig).find(key => pageConfig[key].operation === result.operation);
+  if (!page) return;
+  state.loading[page] = false;
+  if (result.success && Array.isArray(result.data)) {
+    state.data[page] = result.data;
+    state.errors[page] = null;
+  } else {
+    state.errors[page] = result.error || 'Risposta non valida dal backend.';
+    state.data[page] = null;
+  }
+  if (state.page === page && state.mode === 'dashboard') render();
 }
+document.querySelectorAll('.mode').forEach(button => button.addEventListener('click', () => {
+  state.mode = button.dataset.mode;
+  document.querySelectorAll('.mode').forEach(item => item.classList.toggle('active', item === button));
+  render();
+}));
+document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => {
+  state.page = button.dataset.page;
+  state.mode = 'dashboard';
+  document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item === button));
+  document.querySelectorAll('.mode').forEach(item => item.classList.toggle('active', item.dataset.mode === state.mode));
+  render();
+  if (state.page === 'overview') send('dashboard');
+  else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
+}));
+if (hasBridge) {
+  window.chrome.webview.addEventListener('message', handleMessage);
+  send('status');
+} else {
+  showBridgeError();
+}
+render();
