@@ -161,9 +161,10 @@ function Invoke-ScriptAssystRequest {
             'ous' { Get-ScriptAssystOUs -Query $Query }
             'gpos' { Get-ScriptAssystGpos -Query $Query }
             'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
-            { $_ -in 'disableUser','enableUser','moveUser','resetPassword' } {
-                Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon
-            }
+            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
         }
         [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
     } catch {
