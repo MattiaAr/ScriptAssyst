@@ -58,13 +58,26 @@ function Get-ScriptAssystUsers {
 function Get-ScriptAssystGroups {
     [CmdletBinding()]
     param([string]$Query = '')
+
     Import-Module ActiveDirectory -ErrorAction Stop
     $escaped = $Query.Replace("'", "''")
-    $filter = if ([string]::IsNullOrWhiteSpace($Query)) { '*' } else { "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Description -like '*$escaped*'" }
-    @(Get-ADGroup -Filter $filter -Properties GroupCategory,GroupScope,Description,DistinguishedName,Member -ErrorAction Stop |
+
+    $filter = if ([string]::IsNullOrWhiteSpace($Query)) {
+        '*'
+    }
+    else {
+        "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Description -like '*$escaped*'"
+    }
+
+    $groups = Get-ADGroup -Filter $filter `
+        -Properties GroupCategory, GroupScope, Description, DistinguishedName, Member `
+        -ErrorAction Stop |
         Sort-Object Name |
-        Select-Object Name,SamAccountName,GroupCategory,GroupScope,Description,DistinguishedName,@{Name='MemberCount';Expression={ @($_.Member).Count }})
-    )
+        Select-Object Name, SamAccountName, GroupCategory, GroupScope,
+            Description, DistinguishedName,
+            @{Name = 'MemberCount'; Expression = { @($_.Member).Count }}
+
+    return @($groups)
 }
 
 function Get-ScriptAssystOUs {
