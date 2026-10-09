@@ -122,7 +122,7 @@ function Invoke-ScriptAssystUserAction {
         'moveUser' {
             if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Specificare il Distinguished Name della OU di destinazione.' }
             $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
-            if ($user.DistinguishedName -like "*,$($ou.DistinguishedName)") { throw 'L’utente si trova già nella OU di destinazione o in una sua sotto-OU.' }
+            if (($user.DistinguishedName -split ',',2)[1] -ieq $ou.DistinguishedName) { throw 'L’utente si trova già nella OU di destinazione.' }
             Move-ADObject -Identity $user.DistinguishedName -TargetPath $ou.DistinguishedName -Confirm:$false -ErrorAction Stop
             $message = "Account $($user.SamAccountName) spostato in $($ou.DistinguishedName)."
         }
