@@ -22,6 +22,9 @@ if ($ReadRequestFromStdin) {
     if ($null -ne $request.destinationOU) { $DestinationOU = [string]$request.destinationOU }
     if ($null -ne $request.password) { $Password = [string]$request.password }
     if ($null -ne $request.changePasswordAtLogon) { $ChangePasswordAtLogon = [bool]$request.changePasswordAtLogon }
+    if ($null -ne $request.PSObject.Properties['password']) { $request.password = $null }
+    $json = $null
+    $request = $null
 }
 Import-Module (Join-Path $PSScriptRoot 'ScriptAssyst.psm1') -Force
 try {
