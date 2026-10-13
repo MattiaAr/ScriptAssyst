@@ -245,6 +245,10 @@ function tablePage(page) {
   } else {
     body = rows.map(row => '<tr>' + config.render(row).map((value, index) => {
       const key = config.columns[index][0];
+      if (page === 'users' && key === 'Name') {
+        const identity = escapeHtml(row.DistinguishedName || row.SamAccountName || '');
+        return '<td><button class="text-button user-inspect" data-inspect-user="' + identity + '" title="Ispeziona attributi" aria-label="Ispeziona ' + escapeHtml(row.Name) + '">⌕</button> ' + escapeHtml(value ?? '—') + '</td>';
+      }
       if (page === 'users' && key === 'Actions') {
         const identity = escapeHtml(row.DistinguishedName || row.SamAccountName || '');
         const stateAction = row.Enabled === true
@@ -253,7 +257,7 @@ function tablePage(page) {
         const resetAction = row.Enabled === true
           ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
           : '<span class="panel-sub">Reset non disponibile</span>';
-        return '<td><button class="text-button" data-inspect-user="' + identity + '" title="Ispeziona attributi">⌕</button> <button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
+        return '<td><button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
       }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
@@ -530,6 +534,10 @@ function handleMessage(event) {
     } else {
       showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
+    return;
+  }
+  if (['userDetails','groupMembers','ouContents'].includes(result.operation) && !result.success) {
+    showResultModal('Impossibile caricare i dettagli','La richiesta al backend non è riuscita.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
     return;
   }
   if (result.operation === 'userDetails' && result.success && result.data) {
