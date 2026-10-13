@@ -74,3 +74,5 @@
 .directory-tag.custom-tag{border-color:#53687c;background:#2a3949;color:#c2cfde}
 .dn-caption{max-width:100%;overflow-wrap:anywhere}
 @media(max-width:850px){.tree-controls{align-items:flex-start;flex-direction:column}.directory-meta,.directory-tag{font-size:8px}.directory-row{gap:7px;padding:8px}}
+
+.sort-header{display:inline-flex;align-items:center;gap:5px;border:0;padding:0;background:transparent;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}.sort-header:hover,.sort-header:focus-visible{color:#8ee4d7;outline:none}.sort-header:focus-visible{text-decoration:underline;text-underline-offset:3px}
