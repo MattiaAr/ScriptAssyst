@@ -156,7 +156,7 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','groupMembers','updateGroupMembers','ouContents')]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','groupMembers','updateGroupMembers','updateUserGroups','ouContents')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -200,6 +200,7 @@ function Invoke-ScriptAssystRequest {
             'updateGroup' { Set-ScriptAssystGroup -Identity $Identity -GroupName $GroupName -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
             'groupMembers' { Get-ScriptAssystGroupMembers -Identity $Identity }
             'updateGroupMembers' { Set-ScriptAssystGroupMembers -Identity $Identity -Members $Members }
+            'updateUserGroups' { Set-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
             'ouContents' { Get-ScriptAssystOuContents -Identity $Identity }
         }
         [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
@@ -363,6 +364,25 @@ function Get-ScriptAssystOuContents {
     $ou=Get-ADOrganizationalUnit -Identity $Identity -ErrorAction Stop
     $objects=@(Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Filter * -Properties ObjectClass,Description,DistinguishedName -ErrorAction Stop | Select-Object Name,ObjectClass,Description,DistinguishedName)
     [pscustomobject]@{ou=$ou.DistinguishedName;objects=$objects}
+}
+
+
+function Set-ScriptAssystUserGroups {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Groups=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $user=Get-ADUser -Identity $Identity -ErrorAction Stop
+    $current=@(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop | ForEach-Object DistinguishedName)
+    $target=@($Groups | Where-Object { $_ })
+    foreach($dn in $current) {
+        if($target -notcontains $dn) {
+            try { Remove-ADGroupMember -Identity $dn -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop } catch {
+                if($_.Exception.Message -notmatch '(?i)primary group|primaryGroupID') { throw }
+            }
+        }
+    }
+    foreach($dn in $target) { if($current -notcontains $dn) { Add-ADGroupMember -Identity $dn -Members $user.DistinguishedName -ErrorAction Stop } }
+    [pscustomobject]@{message="Appartenenze ai gruppi aggiornate per $($user.SamAccountName)."}
 }
 
 Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
