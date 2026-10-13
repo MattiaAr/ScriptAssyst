@@ -117,7 +117,8 @@ function Invoke-ScriptAssystUserAction {
         'enableUser' {
             if ($user.Enabled) { throw 'L’account è già abilitato.' }
             Enable-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
-            $message = "Account $($user.SamAccountName) abilitato."
+            Unlock-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
+            $message = "Account $($user.SamAccountName) abilitato e sbloccato."
         }
         'moveUser' {
             if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Specificare il Distinguished Name della OU di destinazione.' }
