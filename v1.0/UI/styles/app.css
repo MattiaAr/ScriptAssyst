@@ -34,3 +34,43 @@
 .ou-tree-check{font-size:9px;color:#81dccc;white-space:nowrap}
 .modal-loading{padding:24px;text-align:center;color:#9eacc1;font-size:11px}
 @keyframes modalFade{from{opacity:0}to{opacity:1}}@keyframes modalRise{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+
+
+/* Hierarchical navigation for AD groups and OUs */
+.tree-controls{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 12px;padding:10px 13px;border:1px solid #2b3952;background:#121d30;border-radius:9px}
+.tree-controls>div{display:flex;gap:7px}
+.tree-action{border:1px solid #354763;background:#1b2940;color:#a9e7df;border-radius:7px;padding:7px 10px;font:600 10px 'DM Sans';cursor:pointer}
+.tree-action:hover{background:#263954;border-color:#54718d}
+.directory-tree{display:grid;gap:8px}
+.tree-section{overflow:hidden;border:1px solid #2b3a53;border-radius:11px;background:#111b2d}
+.tree-section-head{display:flex;align-items:center;gap:11px;width:100%;padding:14px 16px;border:0;background:linear-gradient(90deg,#23334d,#18253a);color:#edf3fc;text-align:left;cursor:pointer}
+.tree-section-head:hover{background:linear-gradient(90deg,#2b405e,#1b2c44)}
+.tree-section-chevron{display:grid;place-items:center;width:22px;height:22px;border:1px solid #536985;border-radius:6px;color:#9ce8de;font-size:15px;flex:none}
+.tree-section-icon{color:#9fe5dc;font-size:15px}
+.tree-section-copy{flex:1;min-width:0}
+.tree-section-copy strong{display:block;font-size:12px}
+.tree-section-copy small{display:block;color:#9aabc2;font-size:10px;margin-top:3px}
+.tree-count{padding:4px 8px;border-radius:20px;background:#30445f;color:#d4e1f3;font-size:10px}
+.tree-section-body{padding:7px 10px 10px}
+.directory-node{min-width:0}
+.directory-children{margin-left:21px;padding-left:11px;border-left:1px solid #425975}
+.directory-row{display:flex;align-items:center;gap:10px;min-height:48px;padding:8px 12px;border:1px solid #2a3b54;border-radius:8px;background:#19273d;margin:4px 0;color:#e4ebf6}
+.directory-row-alt{background:#202f47;border-color:#344b68}
+.ous-node>.directory-row{background:#20324a;border-color:#344d6a}
+.ous-node>.directory-children>.ous-node>.directory-row{background:#293c55;border-color:#405a77}
+.ous-node>.directory-children>.ous-node>.directory-children>.ous-node>.directory-row{background:#314660;border-color:#4b6681}
+.ous-node>.directory-children>.ous-node>.directory-children>.ous-node>.directory-children>.ous-node>.directory-row{background:#3a5069;border-color:#58718a}
+.tree-toggle,.tree-toggle-spacer{display:grid;place-items:center;width:23px;height:23px;flex:none}
+.tree-toggle{border:1px solid #516984;border-radius:6px;background:#263b55;color:#d7e8f8;font-size:15px;cursor:pointer}
+.tree-toggle:hover{border-color:#7edbcc;color:#8ce5d8}
+.tree-toggle-spacer{width:23px}
+.directory-icon{color:#9fe6db;font-size:15px;flex:none}
+.directory-label{min-width:0;flex:1}
+.directory-label strong{display:block;font-size:11px;overflow-wrap:anywhere}
+.directory-label small{display:block;margin-top:3px;font-size:9px;line-height:1.45;color:#a7b6ca;white-space:normal;overflow-wrap:anywhere}
+.directory-meta,.directory-tag{flex:none;padding:4px 7px;border:1px solid #45566e;border-radius:20px;color:#b7c5d8;font-size:9px}
+.directory-meta.protected{border-color:#477c70;background:#193c38;color:#a5e8d8}
+.directory-tag.default-tag{border-color:#5277a4;background:#223c5c;color:#c1d9f7}
+.directory-tag.custom-tag{border-color:#53687c;background:#2a3949;color:#c2cfde}
+.dn-caption{max-width:100%;overflow-wrap:anywhere}
+@media(max-width:850px){.tree-controls{align-items:flex-start;flex-direction:column}.directory-meta,.directory-tag{font-size:8px}.directory-row{gap:7px;padding:8px}}
