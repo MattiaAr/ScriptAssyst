@@ -318,7 +318,124 @@ function Remove-ScriptAssystGroup {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity)
     Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
+    $sid=[string]$group.SID.Value
+    $dn=[string]$group.DistinguishedName
+    if($dn -match '(?i)^CN=[^,]+,CN=Builtin,' -or $sid -match '-(512|513|514|515|516|517|518|519|520|521|522|526|527|553)
+}
+function Set-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string]$GroupName,[string]$Description,[string]$GroupCategory,[string]$GroupScope)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Description -ErrorAction Stop
+    if($GroupName -and $GroupName -ne $group.Name){Rename-ADObject -Identity $group.DistinguishedName -NewName $GroupName -ErrorAction Stop}
+    $setParams=@{Identity=$group.ObjectGUID;Description=$Description;ErrorAction='Stop'}
+    if($GroupCategory -in @('Security','Distribution')){$setParams.GroupCategory=$GroupCategory}
+    if($GroupScope -in @('Global','Universal','DomainLocal')){$setParams.GroupScope=$GroupScope}
+    Set-ADGroup @setParams
+    [pscustomobject]@{message="Gruppo aggiornato."}
+}
+function Get-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Member -ErrorAction Stop
+    $members=@(Get-ADGroupMember -Identity $group.DistinguishedName -ErrorAction Stop | ForEach-Object {
+        [pscustomobject]@{Name=$_.Name;SamAccountName=$_.SamAccountName;DistinguishedName=$_.DistinguishedName;ObjectClass=$_.ObjectClass}
+    })
+    [pscustomobject]@{group=$group.Name;members=$members}
+}
+function Set-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Members=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
     $group=Get-ADGroup -Identity $Identity -ErrorAction Stop
+    $current=@(Get-ADGroupMember -Identity $group.DistinguishedName | ForEach-Object DistinguishedName)
+    $target=@($Members | Where-Object { $_ })
+    foreach($dn in $current){if($target -notcontains $dn){Remove-ADGroupMember -Identity $group.DistinguishedName -Members $dn -Confirm:$false -ErrorAction Stop}}
+    foreach($dn in $target){if($current -notcontains $dn){Add-ADGroupMember -Identity $group.DistinguishedName -Members $dn -ErrorAction Stop}}
+    [pscustomobject]@{message="Membri del gruppo $($group.Name) aggiornati."}
+}
+function Get-ScriptAssystOuContents {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $ou=Get-ADOrganizationalUnit -Identity $Identity -ErrorAction Stop
+    $objects=@(Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Filter * -Properties ObjectClass,Description,DistinguishedName -ErrorAction Stop | Select-Object Name,ObjectClass,Description,DistinguishedName)
+    [pscustomobject]@{ou=$ou.DistinguishedName;objects=$objects}
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+ } |
+            ForEach-Object { $_.DistinguishedName })
+    }
+    foreach($group in $groupsToCopy){Add-ADGroupMember -Identity $group -Members $new -ErrorAction Stop}
+    [pscustomobject]@{message="Creato $NewSamAccountName a partire da $($source.SamAccountName)."; user=(Get-ADUser -Identity $NewSamAccountName -Properties Description,Department,Title,Enabled,DistinguishedName -ErrorAction Stop | Select-Object Name,SamAccountName,Description,Department,Title,Enabled,DistinguishedName)}
+}
+
+function New-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([string]$GroupName,[string]$GroupCategory='Security',[string]$GroupScope='Global',[string]$Path,[string]$Description)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if([string]::IsNullOrWhiteSpace($GroupName)){throw 'Il nome del gruppo è obbligatorio.'}
+    if([string]::IsNullOrWhiteSpace($Path)){throw 'Specificare la OU o il container di destinazione.'}
+    New-ADGroup -Name $GroupName -SamAccountName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Path $Path -Description $Description -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo $GroupName creato."}
+}
+function Remove-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -ErrorAction Stop
+    Remove-ADGroup -Identity $group.DistinguishedName -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo $($group.Name) eliminato."}
+}
+function Set-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string]$GroupName,[string]$Description,[string]$GroupCategory,[string]$GroupScope)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Description -ErrorAction Stop
+    if($GroupName -and $GroupName -ne $group.Name){Rename-ADObject -Identity $group.DistinguishedName -NewName $GroupName -ErrorAction Stop}
+    $setParams=@{Identity=$group.ObjectGUID;Description=$Description;ErrorAction='Stop'}
+    if($GroupCategory -in @('Security','Distribution')){$setParams.GroupCategory=$GroupCategory}
+    if($GroupScope -in @('Global','Universal','DomainLocal')){$setParams.GroupScope=$GroupScope}
+    Set-ADGroup @setParams
+    [pscustomobject]@{message="Gruppo aggiornato."}
+}
+function Get-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Member -ErrorAction Stop
+    $members=@(Get-ADGroupMember -Identity $group.DistinguishedName -ErrorAction Stop | ForEach-Object {
+        [pscustomobject]@{Name=$_.Name;SamAccountName=$_.SamAccountName;DistinguishedName=$_.DistinguishedName;ObjectClass=$_.ObjectClass}
+    })
+    [pscustomobject]@{group=$group.Name;members=$members}
+}
+function Set-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Members=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -ErrorAction Stop
+    $current=@(Get-ADGroupMember -Identity $group.DistinguishedName | ForEach-Object DistinguishedName)
+    $target=@($Members | Where-Object { $_ })
+    foreach($dn in $current){if($target -notcontains $dn){Remove-ADGroupMember -Identity $group.DistinguishedName -Members $dn -Confirm:$false -ErrorAction Stop}}
+    foreach($dn in $target){if($current -notcontains $dn){Add-ADGroupMember -Identity $group.DistinguishedName -Members $dn -ErrorAction Stop}}
+    [pscustomobject]@{message="Membri del gruppo $($group.Name) aggiornati."}
+}
+function Get-ScriptAssystOuContents {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $ou=Get-ADOrganizationalUnit -Identity $Identity -ErrorAction Stop
+    $objects=@(Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Filter * -Properties ObjectClass,Description,DistinguishedName -ErrorAction Stop | Select-Object Name,ObjectClass,Description,DistinguishedName)
+    [pscustomobject]@{ou=$ou.DistinguishedName;objects=$objects}
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+) {
+        throw 'Per sicurezza non è consentito eliminare un gruppo Builtin o un gruppo predefinito del dominio.'
+    }
     Remove-ADGroup -Identity $group.DistinguishedName -Confirm:$false -ErrorAction Stop
     [pscustomobject]@{message="Gruppo $($group.Name) eliminato."}
 }
