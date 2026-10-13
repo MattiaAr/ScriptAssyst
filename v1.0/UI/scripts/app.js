@@ -6,7 +6,8 @@ const state = {
   data: { users: null, groups: null, ous: null, gpos: null, tasks: null },
   loading: {},
   errors: {},
-  queries: { users: '', groups: '', ous: '', gpos: '', tasks: '' }
+  queries: { users: '', groups: '', ous: '', gpos: '', tasks: '' },
+  sort: { users: { key: 'Name', direction: 'asc' }, gpo: { key: 'DisplayName', direction: 'asc' }, tasks: { key: 'TaskName', direction: 'asc' } }
 };
 
 const pages = {
@@ -208,8 +209,29 @@ function tablePage(page) {
   const data = state.data[page];
   const error = state.errors[page];
   const loading = state.loading[page];
-  const rows = Array.isArray(data) ? data : [];
-  const header = config.columns.map(col => '<th>' + escapeHtml(col[1]) + '</th>').join('');
+  let rows = Array.isArray(data) ? [...data] : [];
+  const sort = state.sort[page] || { key: config.columns[0][0], direction: 'asc' };
+  rows.sort((a, b) => {
+    const av = a[sort.key]; const bv = b[sort.key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    let result;
+    if (typeof av === 'boolean' || typeof bv === 'boolean') result = Number(Boolean(av)) - Number(Boolean(bv));
+    else if (typeof av === 'number' && typeof bv === 'number') result = av - bv;
+    else {
+      const ad = Date.parse(av); const bd = Date.parse(bv);
+      result = !Number.isNaN(ad) && !Number.isNaN(bd) && /time|date|logon/i.test(sort.key) ? ad - bd : String(av).localeCompare(String(bv), 'it', { numeric: true, sensitivity: 'base' });
+    }
+    return sort.direction === 'asc' ? result : -result;
+  });
+  const header = config.columns.map(col => {
+    const key = col[0];
+    if (key === 'Actions') return '<th>' + escapeHtml(col[1]) + '</th>';
+    const active = sort.key === key;
+    const arrow = active ? (sort.direction === 'asc' ? ' ▲' : ' ▼') : ' ↕';
+    return '<th><button class="sort-header" data-sort-key="' + escapeHtml(key) + '" title="Ordina per ' + escapeHtml(col[1]) + '">' + escapeHtml(col[1]) + arrow + '</button></th>';
+  }).join('');
   let body;
   if (loading && data === null) {
     body = '<tr><td colspan="' + config.columns.length + '" class="empty">Caricamento dati dal backend…</td></tr>';
@@ -385,6 +407,12 @@ function render() {
     else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
   }));
   content.querySelectorAll('[data-user-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.userAction, button.dataset.identity)));
+  content.querySelectorAll('[data-sort-key]').forEach(button => button.addEventListener('click', () => {
+    const page = state.page;
+    const current = state.sort[page] || { key: button.dataset.sortKey, direction: 'asc' };
+    state.sort[page] = { key: button.dataset.sortKey, direction: current.key === button.dataset.sortKey && current.direction === 'asc' ? 'desc' : 'asc' };
+    render();
+  }));
   content.querySelectorAll('[data-tree-toggle]').forEach(button => button.addEventListener('click', () => {
     const type = button.dataset.treeType;
     const id = button.dataset.treeToggle;
