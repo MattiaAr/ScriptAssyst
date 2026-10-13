@@ -38,7 +38,7 @@ function Get-ScriptAssystUsers {
     $filter = if ([string]::IsNullOrWhiteSpace($Query)) { '*' } else { "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Department -like '*$escaped*'" }
     @(Get-ADUser -Filter $filter -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut,Description,GivenName,Surname,DisplayName,UserPrincipalName -ErrorAction Stop |
         Sort-Object Name |
-        Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut)
+        Select-Object Name,SamAccountName,GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,Description,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut)
 }
 
 function Get-ScriptAssystGroups {
