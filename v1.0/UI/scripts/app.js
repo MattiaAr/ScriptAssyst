@@ -7,7 +7,10 @@ const state = {
   loading: {},
   errors: {},
   queries: { users: '', groups: '', ous: '', gpos: '', tasks: '' },
-  sort: { users: { key: 'Name', direction: 'asc' }, gpo: { key: 'DisplayName', direction: 'asc' }, tasks: { key: 'TaskName', direction: 'asc' } }
+  sort: { users: { key: 'Name', direction: 'asc' }, gpo: { key: 'DisplayName', direction: 'asc' }, tasks: { key: 'TaskName', direction: 'asc' } },
+  selectedUser: null,
+  selectedGroup: null,
+  selectedOu: null
 };
 
 const pages = {
@@ -154,7 +157,7 @@ function buildOuTree(items, query = '') {
     const filteredKids = filterTreeItems(kids, query, child => children.get(String(child.DistinguishedName).toLowerCase()) || []);
     const hasChildren = filteredKids.length > 0;
     const open = query ? true : treeExpanded.ous.has(item.DistinguishedName);
-    return renderTreeNode(item, 'ous', depth, filteredKids.map(child=>node(child,depth+1)).join(''), hasChildren, open);
+    return renderTreeNode(item, 'ous', depth, filteredKids.map(child=>node(child,depth+1)).join(''), hasChildren, open).replace('</div>' + (hasChildren && open ? '<div class="directory-children">' + filteredKids.map(child=>node(child,depth+1)).join('') + '</div>' : '') + '</div>', '</div>' + (hasChildren && open ? '<div class="directory-children">' + filteredKids.map(child=>node(child,depth+1)).join('') + '</div>' : '') + '<button class="text-button ou-open" data-ou-open="' + escapeHtml(item.DistinguishedName) + '">Apri contenuto</button></div>');
   }
   const filteredRoots = filterTreeItems(roots, query, item => children.get(String(item.DistinguishedName).toLowerCase()) || []);
   return filteredRoots.map(item=>node(item,0)).join('') || '<div class="empty">Nessuna unità organizzativa trovata.</div>';
@@ -173,7 +176,7 @@ function buildGroupTree(items, query = '') {
     const contents = matches.sort((a,b)=>a.Name.localeCompare(b.Name,'it')).map((item,index) => {
       const fake = {...item, DistinguishedName:item.DistinguishedName || item.Name};
       const id = 'group-' + btoa(unescape(encodeURIComponent(fake.DistinguishedName))).replace(/[^a-zA-Z0-9]/g,'').slice(0,48);
-      return '<div class="directory-node group-node" style="--tree-depth:0"><div class="directory-row ' + (index%2?'directory-row-alt':'') + '"><span class="tree-toggle-spacer"></span><span class="directory-icon">♧</span><div class="directory-label"><strong>' + escapeHtml(item.Name) + '</strong><small>' + escapeHtml(item.GroupCategory || '') + ' · ' + escapeHtml(item.GroupScope || '') + ' · ' + escapeHtml(item.MemberCount ?? 0) + ' membri</small><small class="dn-caption">' + escapeHtml(item.DistinguishedName || '') + '</small></div><span class="directory-tag ' + (isBuiltin(item)?'default-tag':'custom-tag') + '">' + escapeHtml(item.ScriptAssystGroupType || 'Personalizzato') + '</span></div></div>';
+      return '<div class="directory-node group-node" style="--tree-depth:0"><div class="directory-row ' + (index%2?'directory-row-alt':'') + '"><span class="tree-toggle-spacer"></span><span class="directory-icon">♧</span><div class="directory-label"><strong>' + escapeHtml(item.Name) + '</strong><small>' + escapeHtml(item.GroupCategory || '') + ' · ' + escapeHtml(item.GroupScope || '') + ' · ' + escapeHtml(item.MemberCount ?? 0) + ' membri</small><small class="dn-caption">' + escapeHtml(item.DistinguishedName || '') + '</small></div><span class="directory-tag ' + (isBuiltin(item)?'default-tag':'custom-tag') + '">' + escapeHtml(item.ScriptAssystGroupType || 'Personalizzato') + '</span>' + (!isBuiltin(item) ? '<span class="group-actions"><button class="text-button" data-group-members="' + escapeHtml(item.DistinguishedName) + '">Membri</button><button class="text-button" data-edit-group="' + escapeHtml(item.DistinguishedName) + '">Modifica</button><button class="text-button" data-delete-group="' + escapeHtml(item.DistinguishedName) + '">Elimina</button></span>' : '<button class="text-button" data-group-members="' + escapeHtml(item.DistinguishedName) + '">Membri</button>') + '</div></div>';
     }).join('');
     const id = 'group-category-' + category.id;
     return '<section class="tree-section"><button class="tree-section-head" data-tree-toggle="' + id + '" data-tree-type="groups" aria-expanded="' + open + '"><span class="tree-section-chevron">' + (open?'−':'+') + '</span><span class="tree-section-icon">▰</span><span class="tree-section-copy"><strong>' + category.title + '</strong><small>' + category.description + '</small></span><span class="tree-count">' + matches.length + '</span></button>' + (open ? '<div class="tree-section-body">' + (contents || '<div class="empty">Nessun gruppo in questa categoria.</div>') + '</div>' : '') + '</section>';
@@ -190,7 +193,7 @@ function treePage(page) {
   else if (error) body = '<div class="empty">Errore: ' + escapeHtml(error) + '</div>';
   else if (page === 'ous') body = buildOuTree(rows, query);
   else body = buildGroupTree(rows, query);
-  const controls = '<div class="tree-controls"><span class="panel-sub">' + rows.length + (page === 'ous' ? ' unità organizzative' : ' gruppi') + ' · dati Active Directory</span><div><button class="tree-action" data-tree-expand="' + page + '">Espandi tutto</button><button class="tree-action" data-tree-collapse="' + page + '">Comprimi tutto</button></div></div>';
+  const controls = '<div class="tree-controls"><span class="panel-sub">' + rows.length + (page === 'ous' ? ' unità organizzative' : ' gruppi') + ' · dati Active Directory</span><div>' + (page === 'groups' ? '<button class="primary" data-create-group>Nuovo gruppo</button> ' : '') + '<button class="tree-action" data-tree-expand="' + page + '">Espandi tutto</button><button class="tree-action" data-tree-collapse="' + page + '">Comprimi tutto</button></div></div>';
   return '<div class="page-toolbar"><div class="panel-sub">' + escapeHtml(title) + ' · struttura gerarchica</div><input class="search" id="page-search" value="' + escapeHtml(query) + '" placeholder="' + escapeHtml(page === 'ous' ? 'Cerca una OU…' : 'Cerca un gruppo…') + '" aria-label="Cerca"></div>' + controls + '<div class="directory-tree">' + body + '</div>';
 }
 
@@ -250,7 +253,7 @@ function tablePage(page) {
         const resetAction = row.Enabled === true
           ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
           : '<span class="panel-sub">Reset non disponibile</span>';
-        return '<td>' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
+        return '<td><button class="text-button" data-inspect-user="' + identity + '" title="Ispeziona attributi">⌕</button> <button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
       }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
@@ -266,8 +269,8 @@ function tablePage(page) {
     }).join('') + '</tr>').join('');
   }
   return '<div class="page-toolbar"><div class="panel-sub">' + escapeHtml(config.title) +
-    ' · dati ricevuti dal backend</div><input class="search" id="page-search" value="' + escapeHtml(query) +
-    '" placeholder="' + escapeHtml(config.search) + '" aria-label="' + escapeHtml(config.search) + '"></div>' +
+    ' · dati ricevuti dal backend</div><div class="toolbar-actions">' + (page === 'users' ? '<button class="primary" data-create-user>Nuovo utente</button>' : '') + '<input class="search" id="page-search" value="' + escapeHtml(query) +
+    '" placeholder="' + escapeHtml(config.search) + '" aria-label="' + escapeHtml(config.search) + '"></div></div>' +
     '<div class="table-wrap"><table class="data-table"><thead><tr>' + header +
     '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     (loading && data !== null ? '<div class="panel-sub">Aggiornamento in corso…</div>' : '');
@@ -384,6 +387,38 @@ function runUserAction(operation, identity) {
     openPasswordModal(identity, account);
   }
 }
+
+function formField(id,label,value='',type='text',required=false){return '<label class="modal-label" for="'+id+'">'+label+(required?' *':'')+'</label><input class="modal-input" id="'+id+'" type="'+type+'" value="'+escapeHtml(value||'')+'" '+(required?'required':'')+'>';}
+function openUserForm(operation,identity,detail=null){
+  const row=(state.data.users||[]).find(x=>(x.DistinguishedName||x.SamAccountName)===identity)||{};
+  const isCopy=operation==='copyUser', isUpdate=operation==='updateUser';
+  const title=isCopy?'Copia utente':isUpdate?'Modifica utente':'Crea utente';
+  const source=detail||row;
+  const body='<div class="form-grid">'+formField('sa-given','Nome',source.GivenName)+formField('sa-surname','Cognome',source.Surname)+formField('sa-display','Nome visualizzato',source.DisplayName||source.Name)+formField('sa-account',isCopy?'Nuovo nome account':'Nome account',isCopy?'':source.SamAccountName,'text',!isUpdate)+formField('sa-upn','User Principal Name',isCopy?'':source.UserPrincipalName,'text',false)+formField('sa-ou','OU DN di destinazione',isCopy?'':(source.DistinguishedName||'').split(',').slice(1).join(','),'text',!isUpdate)+formField('sa-department','Reparto',source.Department)+formField('sa-title','Titolo',source.Title)+formField('sa-email','E-mail',source.Mail||source.Email)+formField('sa-description','Descrizione',source.Description)+(!isUpdate?formField('sa-new-password','Password iniziale','','password',true):'')+'</div><label class="modal-label" for="sa-groups">Gruppi (DN o nomi, separati da virgola)</label><input class="modal-input" id="sa-groups" value="'+escapeHtml((detail?.groups||[]).map(g=>g.DistinguishedName).join(', '))+'" placeholder="CN=Gruppo,OU=..."><div class="modal-hint">Per creare o copiare l'account servono autorizzazioni AD adeguate. La password deve rispettare la policy del dominio.</div>';
+  const root=showModal(title,isCopy?'Crea un account distinto copiando gli attributi selezionati.':isUpdate?'Aggiorna gli attributi dell’account.':'Crea un account nella OU selezionata.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-user">Salva</button>');
+  root.querySelector('#sa-save-user').addEventListener('click',()=>{
+    const val=id=>root.querySelector('#'+id)?.value||'';
+    if(!isUpdate&&(!val('sa-account').trim()||!val('sa-ou').trim()||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
+    const groups=val('sa-groups').split(',').map(x=>x.trim()).filter(Boolean);
+    const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:val('sa-ou'),department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups,groupName:val('sa-account').trim(),changePasswordAtLogon:true};
+    if(isUpdate) payload.groups=groups;
+    closeModal();send(operation,'',payload);
+  });
+}
+function openGroupForm(identity=''){
+  const row=(state.data.groups||[]).find(x=>x.DistinguishedName===identity)||{};
+  const editing=Boolean(identity);
+  const body=formField('sa-group-name','Nome gruppo',row.Name,'text',true)+formField('sa-group-path','OU/container DN',row.DistinguishedName?row.DistinguishedName.split(',').slice(1).join(','):'','text',!editing)+formField('sa-group-description','Descrizione',row.Description)+(!editing?'<label class="modal-label">Categoria</label><select class="modal-input" id="sa-group-category"><option>Security</option><option>Distribution</option></select><label class="modal-label">Ambito</label><select class="modal-input" id="sa-group-scope"><option>Global</option><option>Universal</option><option>DomainLocal</option></select>':'');
+  const root=showModal(editing?'Modifica gruppo':'Nuovo gruppo','Le modifiche saranno applicate in Active Directory.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-group">Salva</button>');
+  root.querySelector('#sa-save-group').addEventListener('click',()=>{const name=root.querySelector('#sa-group-name').value.trim();if(!name)return;const payload={operation:editing?'updateGroup':'createGroup',identity,groupName:name,path:root.querySelector('#sa-group-path')?.value||'',description:root.querySelector('#sa-group-description').value,groupCategory:root.querySelector('#sa-group-category')?.value||row.GroupCategory||'Security',groupScope:root.querySelector('#sa-group-scope')?.value||row.GroupScope||'Global'};closeModal();send(payload.operation,'',payload);});
+}
+function confirmDeleteGroup(identity){
+ const row=(state.data.groups||[]).find(x=>x.DistinguishedName===identity);
+ const root=showModal('Elimina gruppo','Operazione irreversibile su Active Directory.','<div class="choice-panel"><strong>'+escapeHtml(row?.Name||identity)+'</strong><p>Il gruppo verrà eliminato dalla directory. Verifica che non sia utilizzato da applicazioni o autorizzazioni.</p></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-delete-group">Elimina gruppo</button>');
+ root.querySelector('#sa-delete-group').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity});});
+}
+function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
+
 function guided() {
   return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO</div><h2>Che cosa vuoi consultare?</h2>' +
     '<p>Seleziona un’area per leggere i dati restituiti dal backend. In questa versione le operazioni di modifica ad Active Directory non sono abilitate.</p>' +
@@ -407,6 +442,15 @@ function render() {
     else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
   }));
   content.querySelectorAll('[data-user-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.userAction, button.dataset.identity)));
+  content.querySelectorAll('[data-inspect-user]').forEach(button => button.addEventListener('click', () => { state.selectedUser=button.dataset.inspectUser; send('userDetails','',{identity:button.dataset.inspectUser}); }));
+  content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUserForm('updateUser',button.dataset.editUser)));
+  content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => openUserForm('copyUser',button.dataset.copyUser)));
+  content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', () => openUserForm('createUser','')));
+  content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', openGroupForm));
+  content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => send('groupMembers','',{identity:button.dataset.groupMembers})));
+  content.querySelectorAll('[data-edit-group]').forEach(button => button.addEventListener('click', () => openGroupForm(button.dataset.editGroup)));
+  content.querySelectorAll('[data-delete-group]').forEach(button => button.addEventListener('click', () => confirmDeleteGroup(button.dataset.deleteGroup)));
+  content.querySelectorAll('[data-ou-open]').forEach(button => button.addEventListener('click', () => send('ouContents','',{identity:button.dataset.ouOpen})));
   content.querySelectorAll('[data-sort-key]').forEach(button => button.addEventListener('click', () => {
     const page = state.page;
     const current = state.sort[page] || { key: button.dataset.sortKey, direction: 'asc' };
@@ -486,6 +530,31 @@ function handleMessage(event) {
     } else {
       showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
+    return;
+  }
+  if (result.operation === 'userDetails' && result.success && result.data) {
+    const u=result.data.user||{}, groups=result.data.groups||[];
+    const attrs=[['Nome',u.Name],['Account',u.SamAccountName],['Creato',u.Created||u.WhenCreated],['Ultima modifica',u.Modified||u.WhenChanged],['Ultimo accesso',u.LastLogonDate],['Ultima modifica password',u.PasswordLastSet],['Tentativi password errati',u.BadPwdCount],['Ultimo tentativo errato',u.LastBadPasswordAttempt],['Bloccato',u.LockedOut?'Sì':'No'],['E-mail',u.Mail],['Descrizione',u.Description],['Distinguished name',u.DistinguishedName]];
+    const body='<div class="detail-grid">'+attrs.map(([k,v])=>'<div class="detail-item"><small>'+escapeHtml(k)+'</small><strong>'+escapeHtml(v??'—')+'</strong></div>').join('')+'</div><h3 class="modal-section-title">Gruppi di appartenenza</h3><div class="group-members-list">'+groups.map(g=>'<label><input type="checkbox" checked data-member-dn="'+escapeHtml(g.DistinguishedName)+'"> '+escapeHtml(g.Name)+'</label>').join('')+'</div><div class="modal-hint">Deseleziona i gruppi da rimuovere; per aggiungerne altri usa Modifica utente e inserisci i DN nella sezione Gruppi.</div><button class="secondary" id="sa-save-members">Salva appartenenze</button>';
+    const root=showModal('Dettaglio utente',u.SamAccountName||'',body,'<button class="secondary" data-modal-cancel>Chiudi</button>');
+    root.querySelector('#sa-save-members').addEventListener('click',()=>{const groups=[...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn);closeModal();send('updateUser','',{operation:'updateUser',identity:u.DistinguishedName,groups,description:u.Description||'',department:u.Department||'',title:u.Title||'',email:u.Mail||'',givenName:u.GivenName||'',surname:u.Surname||'',displayName:u.DisplayName||u.Name,userPrincipalName:u.UserPrincipalName||''});});
+    return;
+  }
+  if (result.operation === 'groupMembers' && result.success && result.data) {
+    const members=result.data.members||[];
+    const body='<div class="group-members-list">'+members.map(m=>'<label><input type="checkbox" checked data-member-dn="'+escapeHtml(m.DistinguishedName)+'"> '+escapeHtml(m.Name)+' <small>'+escapeHtml(m.ObjectClass)+'</small></label>').join('')+'</div><div class="modal-hint">Deseleziona gli elementi da rimuovere. Per aggiungere membri, inserisci i DN nel campo sottostante, uno per riga.</div><textarea class="modal-input" id="sa-add-members" placeholder="DistinguishedName di utenti o gruppi, uno per riga"></textarea>';
+    const root=showModal('Membri del gruppo',result.data.group||'',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-group-members">Salva membri</button>');
+    root.querySelector('#sa-save-group-members').addEventListener('click',()=>{const members=[...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn).concat(root.querySelector('#sa-add-members').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean));closeModal();send('updateGroupMembers','',{operation:'updateGroupMembers',identity:result.data.group,members});});
+    return;
+  }
+  if (result.operation === 'ouContents' && result.success && result.data) {
+    const objs=result.data.objects||[];
+    showResultModal('Contenuto OU',result.data.ou,'<div class="ou-contents-list">'+objs.map(o=>'<div class="ou-content-row"><strong>'+escapeHtml(o.Name)+'</strong><span>'+escapeHtml(o.ObjectClass)+'</span><small>'+escapeHtml(o.Description||o.DistinguishedName)+'</small></div>').join('')+'</div>');
+    return;
+  }
+  if (['createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers'].includes(result.operation)) {
+    if(result.success){showResultModal('Operazione completata',result.data?.message||'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');state.data.users=null;state.data.groups=null;state.data.ous=null;if(state.page==='users')requestPage('users',state.queries.users||'');if(state.page==='groups')requestPage('groups',state.queries.groups||'');send('dashboard');}
+    else showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
     return;
   }
   if (result.operation === 'dashboard') {
