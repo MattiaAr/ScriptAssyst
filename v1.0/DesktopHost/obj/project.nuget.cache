@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "1eZCfFpE2Jk=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\MerrinoM\\Documents\\GitHub\\ScriptAssyst\\v1.0\\DesktopHost\\ScriptAssyst.Desktop.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\MerrinoM\\.nuget\\packages\\microsoft.web.webview2\\1.0.2903.40\\microsoft.web.webview2.1.0.2903.40.nupkg.sha512"
+  ],
+  "logs": []
+}
