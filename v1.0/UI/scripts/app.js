@@ -126,7 +126,7 @@ function renderTreeNode(item, type, depth, childHtml, hasChildren, open) {
     '<span class="directory-icon">' + icon + '</span><div class="directory-label"><strong>' + escapeHtml(label) + '</strong>' +
     (type === 'ous' ? '<small>' + escapeHtml(item.DistinguishedName || '') + '</small>' : '<small>' + escapeHtml(item.GroupCategory || '') + ' · ' + escapeHtml(item.GroupScope || '') + ' · ' + escapeHtml(item.MemberCount ?? 0) + ' membri</small>') +
     '</div>' + (type === 'ous' ? '<span class="directory-meta ' + (item.ProtectedFromAccidentalDeletion ? 'protected' : '') + '">' + (item.ProtectedFromAccidentalDeletion ? 'Protetta' : 'Non protetta') + '</span>' : '<span class="directory-tag ' + (item.ScriptAssystGroupType === 'Predefinito' ? 'default-tag' : 'custom-tag') + '">' + escapeHtml(item.ScriptAssystGroupType || 'Personalizzato') + '</span>') +
-    '</div>' + (hasChildren && open ? '<div class="directory-children">' + childHtml + '</div>' : '') + '</div>';
+    '</div>' + (hasChildren && open ? '<div class="directory-children">' + childHtml + '</div>' : '') + (type === 'ous' ? '<button class="text-button ou-open" data-ou-open="' + escapeHtml(item.DistinguishedName) + '">Apri contenuto</button>' : '') + '</div>';
 }
 function filterTreeItems(items, query, getChildren) {
   if (!query) return items;
@@ -157,7 +157,7 @@ function buildOuTree(items, query = '') {
     const filteredKids = filterTreeItems(kids, query, child => children.get(String(child.DistinguishedName).toLowerCase()) || []);
     const hasChildren = filteredKids.length > 0;
     const open = query ? true : treeExpanded.ous.has(item.DistinguishedName);
-    return renderTreeNode(item, 'ous', depth, filteredKids.map(child=>node(child,depth+1)).join(''), hasChildren, open).replace('</div>' + (hasChildren && open ? '<div class="directory-children">' + filteredKids.map(child=>node(child,depth+1)).join('') + '</div>' : '') + '</div>', '</div>' + (hasChildren && open ? '<div class="directory-children">' + filteredKids.map(child=>node(child,depth+1)).join('') + '</div>' : '') + '<button class="text-button ou-open" data-ou-open="' + escapeHtml(item.DistinguishedName) + '">Apri contenuto</button></div>');
+    return renderTreeNode(item, 'ous', depth, filteredKids.map(child=>node(child,depth+1)).join(''), hasChildren, open);
   }
   const filteredRoots = filterTreeItems(roots, query, item => children.get(String(item.DistinguishedName).toLowerCase()) || []);
   return filteredRoots.map(item=>node(item,0)).join('') || '<div class="empty">Nessuna unità organizzativa trovata.</div>';
