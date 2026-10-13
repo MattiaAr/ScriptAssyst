@@ -326,7 +326,10 @@ function Set-ScriptAssystGroup {
     Import-Module ActiveDirectory -ErrorAction Stop
     $group=Get-ADGroup -Identity $Identity -Properties Description -ErrorAction Stop
     if($GroupName -and $GroupName -ne $group.Name){Rename-ADObject -Identity $group.DistinguishedName -NewName $GroupName -ErrorAction Stop}
-    Set-ADGroup -Identity $group.DistinguishedName -Description $Description -ErrorAction Stop
+    $setParams=@{Identity=$group.ObjectGUID;Description=$Description;ErrorAction='Stop'}
+    if($GroupCategory -in @('Security','Distribution')){$setParams.GroupCategory=$GroupCategory}
+    if($GroupScope -in @('Global','Universal','DomainLocal')){$setParams.GroupScope=$GroupScope}
+    Set-ADGroup @setParams
     [pscustomobject]@{message="Gruppo aggiornato."}
 }
 function Get-ScriptAssystGroupMembers {
