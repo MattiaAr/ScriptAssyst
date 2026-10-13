@@ -54,10 +54,19 @@ function Get-ScriptAssystGroups {
         Select-Object Name,SamAccountName,GroupCategory,GroupScope,Description,DistinguishedName,
             @{Name = 'MemberCount'; Expression = { @($_.Member).Count }},
             @{Name = 'ScriptAssystGroupType'; Expression = {
-                $dn = [string]$_.DistinguishedName
-                $sid = [string]$_.SID.Value
+                $groupDn = [string]$_.DistinguishedName
+                $groupSid = [string]$_.SID.Value
                 $rid = 0
-                if ($sid -match '-(\d+)
+                if ($groupSid -match '-(\d+)$') { $rid = [int]$Matches[1] }
+                if ($groupDn -match '(?i)^CN=[^,]+,CN=Builtin,') {
+                    'Predefinito'
+                } elseif ($groupSid.StartsWith($domainSid + '-') -and $defaultDomainRids -contains $rid) {
+                    'Predefinito'
+                } else {
+                    'Personalizzato'
+                }
+            }}
+    return @($groups)
 }
 
 function Get-ScriptAssystOUs {
