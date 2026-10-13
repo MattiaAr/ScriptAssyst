@@ -158,31 +158,117 @@ function tablePage(page) {
     '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     (loading && data !== null ? '<div class="panel-sub">Aggiornamento in corso…</div>' : '');
 }
+let modalState = null;
+function closeModal() {
+  document.querySelector('#sa-modal-root')?.remove();
+  modalState = null;
+}
+function showModal(title, subtitle, body, actions) {
+  closeModal();
+  const root = document.createElement('div');
+  root.id = 'sa-modal-root';
+  root.innerHTML = '<div class="modal-backdrop" data-modal-close="true"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sa-modal-title">' +
+    '<div class="modal-heading"><div><div class="modal-kicker">SCRIPTASSYST · ACTIVE DIRECTORY</div><h2 id="sa-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(subtitle || '') + '</p></div>' +
+    '<button class="modal-x" data-modal-cancel aria-label="Chiudi">×</button></div><div class="modal-body">' + body + '</div><div class="modal-actions">' + actions + '</div></section></div>';
+  document.body.appendChild(root);
+  root.querySelector('.modal-card').addEventListener('click', e => e.stopPropagation());
+  root.querySelector('[data-modal-close]')?.addEventListener('click', closeModal);
+  root.querySelectorAll('[data-modal-cancel]').forEach(el => el.addEventListener('click', closeModal));
+  return root;
+}
+function openPasswordModal(identity, account, afterEnable = false) {
+  const root = showModal(afterEnable ? 'Account abilitato' : 'Reimposta password',
+    afterEnable ? 'Account abilitato e sbloccato. Imposta ora una nuova password.' : 'Inserisci la nuova password per questo account.',
+    '<label class="modal-label" for="sa-password">Nuova password</label><input class="modal-input" id="sa-password" type="password" autocomplete="new-password" placeholder="Nuova password" />' +
+    '<label class="modal-label" for="sa-password-repeat">Conferma password</label><input class="modal-input" id="sa-password-repeat" type="password" autocomplete="new-password" placeholder="Ripeti la password" />' +
+    '<div class="modal-hint">La policy password del dominio Active Directory verrà applicata.</div>',
+    '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-password-next">Continua</button>');
+  root.querySelector('#sa-password').focus();
+  root.querySelector('#sa-password-next').addEventListener('click', () => {
+    const password = root.querySelector('#sa-password').value;
+    const repeated = root.querySelector('#sa-password-repeat').value;
+    if (!password) { root.querySelector('#sa-modal-error')?.remove(); root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div id="sa-modal-error" class="modal-error">Inserisci una password.</div>'); return; }
+    if (password !== repeated) { root.querySelector('#sa-modal-error')?.remove(); root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div id="sa-modal-error" class="modal-error">Le password non coincidono.</div>'); return; }
+    showPasswordChangeChoice(identity, account, password);
+  });
+}
+function showPasswordChangeChoice(identity, account, password) {
+  const root = showModal('Cambio password al prossimo accesso?', 'Vuoi obbligare ' + account + ' a cambiare password al prossimo accesso?',
+    '<div class="choice-panel"><strong>Impostazione di sicurezza</strong><p>Sì: l’utente dovrà scegliere una nuova password al prossimo accesso.<br>No: la password impostata resterà valida senza richiesta immediata di cambio.</p></div>',
+    '<button class="secondary" id="sa-change-cancel">Annulla</button><button class="secondary" id="sa-change-no">No</button><button class="primary" id="sa-change-yes">Sì</button>');
+  const submit = change => {
+    closeModal();
+    send('resetPassword', state.queries.users || '', {operation:'resetPassword',identity,password,changePasswordAtLogon:change});
+  };
+  root.querySelector('#sa-change-yes').addEventListener('click', () => submit(true));
+  root.querySelector('#sa-change-no').addEventListener('click', () => submit(false));
+  root.querySelector('#sa-change-cancel').addEventListener('click', closeModal);
+}
+function openOuPicker(identity, account) {
+  modalState = { identity, account };
+  if (!Array.isArray(state.data.ous)) {
+    const root = showModal('Sposta utente in una OU', 'Caricamento della struttura Active Directory…',
+      '<div class="modal-loading">Lettura delle unità organizzative dal dominio…</div>',
+      '<button class="secondary" data-modal-cancel>Annulla</button>');
+    send('ous');
+    return;
+  }
+  renderOuPicker();
+}
+function renderOuPicker() {
+  if (!modalState) return;
+  const { identity, account } = modalState;
+  const ous = Array.isArray(state.data.ous) ? [...state.data.ous] : [];
+  const user = (state.data.users || []).find(item => (item.DistinguishedName || item.SamAccountName) === identity);
+  const currentParent = user?.DistinguishedName?.split(',').slice(1).join(',') || '';
+  const root = showModal('Sposta utente in una OU', 'Seleziona la destinazione per ' + account + '.',
+    '<div class="ou-current">Posizione attuale <strong>' + escapeHtml(currentParent || 'Non disponibile') + '</strong></div>' +
+    '<div class="ou-tree" role="tree">' + ous.map(ou => {
+      const depth = (ou.DistinguishedName.match(/OU=/gi) || []).length - 1;
+      return '<button class="ou-tree-item" role="treeitem" style="--ou-depth:' + Math.max(0,depth) + '" data-ou-dn="' + escapeHtml(ou.DistinguishedName) + '">' +
+        '<span class="ou-tree-icon">▤</span><span><strong>' + escapeHtml(ou.Name) + '</strong><small>' + escapeHtml(ou.DistinguishedName) + '</small></span><span class="ou-tree-check">Seleziona</span></button>';
+    }).join('') + (ous.length ? '' : '<div class="modal-loading">Nessuna OU restituita dal backend.</div>') + '</div><div class="modal-hint">La selezione indica la OU di destinazione; confermerai prima dello spostamento.</div>',
+    '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-move-confirm" disabled>Sposta qui</button>');
+  const confirmButton = root.querySelector('#sa-move-confirm');
+  root.querySelectorAll('[data-ou-dn]').forEach(button => button.addEventListener('click', () => {
+    root.querySelectorAll('[data-ou-dn]').forEach(item => item.classList.remove('selected'));
+    button.classList.add('selected');
+    modalState.destinationOU = button.dataset.ouDn;
+    confirmButton.disabled = false;
+  }));
+  confirmButton.addEventListener('click', () => {
+    if (!modalState?.destinationOU) return;
+    const destinationOU = modalState.destinationOU;
+    const confirmed = showModal('Conferma spostamento', 'Stai per spostare ' + account + '.',
+      '<div class="choice-panel"><strong>OU di destinazione</strong><p>' + escapeHtml(destinationOU) + '</p></div>',
+      '<button class="secondary" id="sa-move-back">Indietro</button><button class="primary" id="sa-move-execute">Conferma spostamento</button>');
+    confirmed.querySelector('#sa-move-back').addEventListener('click', renderOuPicker);
+    confirmed.querySelector('#sa-move-execute').addEventListener('click', () => {
+      closeModal();
+      send('moveUser', state.queries.users || '', {operation:'moveUser',identity,destinationOU});
+    });
+  });
+}
 function runUserAction(operation, identity) {
   const user = (state.data.users || []).find(item => (item.DistinguishedName || item.SamAccountName) === identity);
-  if (!user) { alert('Utente non trovato nei dati correnti. Aggiorna la tabella e riprova.'); return; }
+  if (!user) { showModal('Utente non trovato', 'I dati visualizzati potrebbero non essere aggiornati.', '<p>Aggiorna la tabella Utenti e riprova.</p>', '<button class="primary" data-modal-cancel>Chiudi</button>'); return; }
   const account = user.SamAccountName || user.Name || identity;
-  const payload = { operation, identity };
   if (operation === 'disableUser') {
-    if (!confirm('Confermi la disabilitazione dell’account ' + account + '? L’accesso dell’utente verrà bloccato.')) return;
+    const root = showModal('Disabilita account', 'Conferma la disabilitazione dell’account.',
+      '<div class="choice-panel"><strong>' + escapeHtml(account) + '</strong><p>L’accesso dell’utente verrà bloccato.</p></div>',
+      '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-action-confirm">Disabilita account</button>');
+    root.querySelector('#sa-action-confirm').addEventListener('click', () => { closeModal(); send(operation, state.queries.users || '', {operation,identity}); });
   } else if (operation === 'enableUser') {
-    if (!confirm('Confermi la riabilitazione dell’account ' + account + '?')) return;
+    const root = showModal('Abilita e sblocca account', 'L’account verrà abilitato e sbloccato. Subito dopo potrai impostare una nuova password.',
+      '<div class="choice-panel"><strong>' + escapeHtml(account) + '</strong><p>Al termine ti chiederemo di inserire e confermare una nuova password.</p></div>',
+      '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-action-confirm">Abilita e sblocca</button>');
+    root.querySelector('#sa-action-confirm').addEventListener('click', () => { closeModal(); send(operation, state.queries.users || '', {operation,identity}); });
   } else if (operation === 'moveUser') {
-    const destinationOU = prompt('Inserisci il Distinguished Name completo della OU di destinazione.\nEsempio: OU=RepartoIT,OU=Utenti,DC=homelab,DC=local');
-    if (!destinationOU || !destinationOU.trim()) return;
-    if (!confirm('Spostare ' + account + ' in questa OU?\n' + destinationOU.trim())) return;
-    payload.destinationOU = destinationOU.trim();
+    openOuPicker(identity, account);
   } else if (operation === 'resetPassword') {
-    if (user.Enabled !== true) { alert('Il reset password è consentito solo agli account abilitati.'); return; }
-    const password = prompt('Inserisci la nuova password per ' + account + '. La policy del dominio verrà applicata da Active Directory.');
-    if (password === null || password.length === 0) return;
-    const repeated = prompt('Conferma la nuova password.');
-    if (password !== repeated) { alert('Le password non coincidono. Nessuna modifica eseguita.'); return; }
-    payload.password = password;
-    payload.changePasswordAtLogon = confirm('Richiedere all’utente di cambiare password al prossimo accesso?');
-    if (!confirm('Confermi il reset della password per ' + account + '?')) return;
-  } else return;
-  send(operation, state.queries.users || '', payload);
+    if (user.Enabled !== true) { showModal('Account disabilitato', 'Prima di reimpostare la password, abilita l’account.', '<p>Usa l’azione Abilita. ScriptAssyst eseguirà anche lo sblocco dell’account.</p>', '<button class="primary" data-modal-cancel>Ho capito</button>'); return; }
+    openPasswordModal(identity, account);
+  }
 }
 function guided() {
   return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO</div><h2>Che cosa vuoi consultare?</h2>' +
@@ -238,12 +324,17 @@ function handleMessage(event) {
   }
   if (['disableUser', 'enableUser', 'moveUser', 'resetPassword'].includes(result.operation)) {
     if (result.success && result.data) {
-      alert(result.data.message || 'Operazione completata.');
+      const affected = result.data.user?.SamAccountName || result.data.user?.Name || 'account';
       state.data.users = null;
       requestPage('users', state.queries.users || '');
       send('dashboard');
+      if (result.operation === 'enableUser') {
+        openPasswordModal(result.data.user?.DistinguishedName || '', affected, true);
+      } else {
+        showModal('Operazione completata', result.data.message || 'Operazione completata.', '<div class="choice-panel"><strong>' + escapeHtml(affected) + '</strong><p>Le modifiche sono state inviate ad Active Directory.</p></div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
+      }
     } else {
-      alert('Operazione non completata: ' + (result.error || 'errore non specificato'));
+      showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
     return;
   }
@@ -264,6 +355,7 @@ function handleMessage(event) {
   if (result.success && Array.isArray(result.data)) {
     state.data[page] = result.data;
     state.errors[page] = null;
+    if (page === 'ous' && modalState && !modalState.destinationOU) renderOuPicker();
   } else {
     state.errors[page] = result.error || 'Risposta non valida dal backend.';
     state.data[page] = null;
