@@ -145,13 +145,27 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword')]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','groupMembers','updateGroupMembers','ouContents')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
         [string]$DestinationOU = '',
         [string]$Password = '',
-        [bool]$ChangePasswordAtLogon = $false
+        [bool]$ChangePasswordAtLogon = $false,
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Path = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string]$GroupName = '',
+        [string]$GroupCategory = 'Security',
+        [string]$GroupScope = 'Global',
+        [string[]]$Groups = @(),
+        [string[]]$Members = @()
     )
     try {
         $data = switch ($Operation) {
@@ -166,6 +180,16 @@ function Invoke-ScriptAssystRequest {
             'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
             'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
             'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'createUser' { New-ScriptAssystUser -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -Identity $Identity -UserPrincipalName $UserPrincipalName -Path $Path -Password $Password -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups }
+            'updateUser' { Set-ScriptAssystUser -Identity $Identity -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups }
+            'copyUser' { Copy-ScriptAssystUser -Identity $Identity -NewSamAccountName $GroupName -NewUserPrincipalName $UserPrincipalName -NewPath $Path -Password $Password -CopyGroups $Groups -CopyDescription ([bool]$ChangePasswordAtLogon) }
+            'createGroup' { New-ScriptAssystGroup -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Path $Path -Description $Description }
+            'deleteGroup' { Remove-ScriptAssystGroup -Identity $Identity }
+            'updateGroup' { Set-ScriptAssystGroup -Identity $Identity -GroupName $GroupName -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
+            'groupMembers' { Get-ScriptAssystGroupMembers -Identity $Identity }
+            'updateGroupMembers' { Set-ScriptAssystGroupMembers -Identity $Identity -Members $Members }
+            'ouContents' { Get-ScriptAssystOuContents -Identity $Identity }
         }
         [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
     } catch {
@@ -173,6 +197,155 @@ function Invoke-ScriptAssystRequest {
     } finally {
         if ($Password) { $Password = $null }
     }
+}
+
+
+
+function Get-ScriptAssystUserDetails {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $user = Get-ADUser -Identity $Identity -Properties * -ErrorAction Stop
+    $groups = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop | Select-Object Name,SamAccountName,DistinguishedName,GroupCategory,GroupScope)
+    [pscustomobject]@{
+        user = [pscustomobject]@{
+            Name=$user.Name; SamAccountName=$user.SamAccountName; GivenName=$user.GivenName; Surname=$user.Surname
+            DisplayName=$user.DisplayName; UserPrincipalName=$user.UserPrincipalName; Department=$user.Department
+            Title=$user.Title; Mail=$user.Mail; Description=$user.Description; Enabled=$user.Enabled
+            DistinguishedName=$user.DistinguishedName; Created=$user.Created; Modified=$user.Modified
+            LastLogonDate=$user.LastLogonDate; PasswordLastSet=$user.PasswordLastSet
+            BadPwdCount=$user.BadPwdCount; LastBadPasswordAttempt=$user.LastBadPasswordAttempt
+            LockedOut=$user.LockedOut; WhenCreated=$user.WhenCreated; WhenChanged=$user.WhenChanged
+        }
+        groups=$groups
+    }
+}
+
+function New-ScriptAssystUser {
+    [CmdletBinding()]
+    param([string]$GivenName,[string]$Surname,[string]$DisplayName,[string]$Identity,[string]$UserPrincipalName,[string]$Path,[string]$Password,[string]$Department,[string]$Title,[string]$Email,[string]$Description,[string[]]$Groups=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity)) { throw 'Il nome account (sAMAccountName) è obbligatorio.' }
+    if ($Identity.Length -gt 20) { throw 'Il nome account sAMAccountName non può superare 20 caratteri.' }
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Selezionare la OU di destinazione.' }
+    if ([string]::IsNullOrEmpty($Password)) { throw 'La password iniziale è obbligatoria.' }
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) { $DisplayName = (@($GivenName,$Surname | Where-Object { $_ }) -join ' ').Trim() }
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) { $DisplayName = $Identity }
+    if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        $domain = Get-ADDomain -ErrorAction Stop
+        $UserPrincipalName = "$Identity@$($domain.DNSRoot)"
+    }
+    $secure = ConvertTo-SecureString $Password -AsPlainText -Force
+    $args = @{Name=$DisplayName;SamAccountName=$Identity;UserPrincipalName=$UserPrincipalName;Path=$Path;AccountPassword=$secure;Enabled=$true;ErrorAction='Stop'}
+    if ($GivenName) {$args.GivenName=$GivenName}; if ($Surname) {$args.Surname=$Surname}
+    if ($Department) {$args.Department=$Department}; if ($Title) {$args.Title=$Title}
+    if ($Description) {$args.Description=$Description}
+    New-ADUser @args
+    $created = Get-ADUser -Identity $Identity -ErrorAction Stop
+    foreach ($group in @($Groups | Where-Object { $_ })) { Add-ADGroupMember -Identity $group -Members $created -ErrorAction Stop }
+    if ($Email) { Set-ADUser -Identity $created -EmailAddress $Email -ErrorAction Stop }
+    [pscustomobject]@{message="Utente $Identity creato."; user=(Get-ADUser -Identity $Identity -Properties Mail,Description,Department,Title,Enabled,DistinguishedName -ErrorAction Stop | Select-Object Name,SamAccountName,Mail,Description,Department,Title,Enabled,DistinguishedName)}
+}
+
+function Set-ScriptAssystUser {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string]$GivenName,[string]$Surname,[string]$DisplayName,[string]$UserPrincipalName,[string]$Department,[string]$Title,[string]$Email,[string]$Description,[string[]]$Groups=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $user=Get-ADUser -Identity $Identity -ErrorAction Stop
+    $params=@{Identity=$user.DistinguishedName;ErrorAction='Stop'}
+    if ($PSBoundParameters.ContainsKey('GivenName')) {$params.GivenName=$GivenName}
+    if ($PSBoundParameters.ContainsKey('Surname')) {$params.Surname=$Surname}
+    if ($PSBoundParameters.ContainsKey('DisplayName')) {$params.DisplayName=$DisplayName}
+    if ($PSBoundParameters.ContainsKey('UserPrincipalName') -and $UserPrincipalName) {$params.UserPrincipalName=$UserPrincipalName}
+    if ($PSBoundParameters.ContainsKey('Department')) {$params.Department=$Department}
+    if ($PSBoundParameters.ContainsKey('Title')) {$params.Title=$Title}
+    if ($PSBoundParameters.ContainsKey('Description')) {$params.Description=$Description}
+    Set-ADUser @params
+    if ($PSBoundParameters.ContainsKey('Email')) { Set-ADUser -Identity $user.DistinguishedName -EmailAddress $Email -ErrorAction Stop }
+    if ($Groups.Count -gt 0) {
+        $current=@(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName | ForEach-Object DistinguishedName)
+        $target=@($Groups | Where-Object { $_ })
+        foreach($dn in $current) { if($target -notcontains $dn) { try { Remove-ADGroupMember -Identity $dn -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop } catch {} } }
+        foreach($dn in $target) { if($current -notcontains $dn) { Add-ADGroupMember -Identity $dn -Members $user.DistinguishedName -ErrorAction Stop } }
+    }
+    [pscustomobject]@{message="Utente $($user.SamAccountName) aggiornato."; user=(Get-ADUser -Identity $user.SamAccountName -Properties Mail,Description,Department,Title,Enabled,DistinguishedName -ErrorAction Stop | Select-Object Name,SamAccountName,Mail,Description,Department,Title,Enabled,DistinguishedName)}
+}
+
+function Copy-ScriptAssystUser {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string]$NewSamAccountName,[string]$NewUserPrincipalName,[string]$NewPath,[string]$Password,[string[]]$CopyGroups=@(),[bool]$CopyDescription=$true)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if([string]::IsNullOrWhiteSpace($NewSamAccountName)){throw 'Specificare il nuovo nome account.'}
+    if([string]::IsNullOrWhiteSpace($NewPath)){throw 'Selezionare la OU di destinazione.'}
+    if([string]::IsNullOrEmpty($Password)){throw 'Specificare la password iniziale del nuovo account.'}
+    $source=Get-ADUser -Identity $Identity -Properties * -ErrorAction Stop
+    if(-not $NewUserPrincipalName){$domain=Get-ADDomain; $NewUserPrincipalName="$NewSamAccountName@$($domain.DNSRoot)"}
+    $display=$source.DisplayName
+    $secure=ConvertTo-SecureString $Password -AsPlainText -Force
+    $params=@{Name=$display;SamAccountName=$NewSamAccountName;UserPrincipalName=$NewUserPrincipalName;Path=$NewPath;AccountPassword=$secure;Enabled=$true;ErrorAction='Stop'}
+    if($source.GivenName){$params.GivenName=$source.GivenName};if($source.Surname){$params.Surname=$source.Surname}
+    if($source.Department){$params.Department=$source.Department};if($source.Title){$params.Title=$source.Title}
+    if($CopyDescription -and $source.Description){$params.Description=$source.Description}
+    New-ADUser @params
+    $new=Get-ADUser -Identity $NewSamAccountName -ErrorAction Stop
+    foreach($group in @($CopyGroups | Where-Object { $_ })){Add-ADGroupMember -Identity $group -Members $new -ErrorAction Stop}
+    [pscustomobject]@{message="Creato $NewSamAccountName a partire da $($source.SamAccountName)."; user=(Get-ADUser -Identity $NewSamAccountName -Properties Description,Department,Title,Enabled,DistinguishedName -ErrorAction Stop | Select-Object Name,SamAccountName,Description,Department,Title,Enabled,DistinguishedName)}
+}
+
+function New-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([string]$GroupName,[string]$GroupCategory='Security',[string]$GroupScope='Global',[string]$Path,[string]$Description)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if([string]::IsNullOrWhiteSpace($GroupName)){throw 'Il nome del gruppo è obbligatorio.'}
+    if([string]::IsNullOrWhiteSpace($Path)){throw 'Specificare la OU o il container di destinazione.'}
+    New-ADGroup -Name $GroupName -SamAccountName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Path $Path -Description $Description -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo $GroupName creato."}
+}
+function Remove-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -ErrorAction Stop
+    Remove-ADGroup -Identity $group.DistinguishedName -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo $($group.Name) eliminato."}
+}
+function Set-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string]$GroupName,[string]$Description,[string]$GroupCategory,[string]$GroupScope)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Description -ErrorAction Stop
+    if($GroupName -and $GroupName -ne $group.Name){Rename-ADObject -Identity $group.DistinguishedName -NewName $GroupName -ErrorAction Stop}
+    Set-ADGroup -Identity $group.DistinguishedName -Description $Description -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo aggiornato."}
+}
+function Get-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -Properties Member -ErrorAction Stop
+    $members=@(Get-ADGroupMember -Identity $group.DistinguishedName -ErrorAction Stop | ForEach-Object {
+        [pscustomobject]@{Name=$_.Name;SamAccountName=$_.SamAccountName;DistinguishedName=$_.DistinguishedName;ObjectClass=$_.ObjectClass}
+    })
+    [pscustomobject]@{group=$group.Name;members=$members}
+}
+function Set-ScriptAssystGroupMembers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Members=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $group=Get-ADGroup -Identity $Identity -ErrorAction Stop
+    $current=@(Get-ADGroupMember -Identity $group.DistinguishedName | ForEach-Object DistinguishedName)
+    $target=@($Members | Where-Object { $_ })
+    foreach($dn in $current){if($target -notcontains $dn){Remove-ADGroupMember -Identity $group.DistinguishedName -Members $dn -Confirm:$false -ErrorAction Stop}}
+    foreach($dn in $target){if($current -notcontains $dn){Add-ADGroupMember -Identity $group.DistinguishedName -Members $dn -ErrorAction Stop}}
+    [pscustomobject]@{message="Membri del gruppo $($group.Name) aggiornati."}
+}
+function Get-ScriptAssystOuContents {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $ou=Get-ADOrganizationalUnit -Identity $Identity -ErrorAction Stop
+    $objects=@(Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -Filter * -Properties ObjectClass,Description,DistinguishedName -ErrorAction Stop | Select-Object Name,ObjectClass,Description,DistinguishedName)
+    [pscustomobject]@{ou=$ou.DistinguishedName;objects=$objects}
 }
 
 Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
