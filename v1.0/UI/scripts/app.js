@@ -164,7 +164,7 @@ function closeModal() {
   modalState = null;
 }
 function showModal(title, subtitle, body, actions) {
-  closeModal();
+  document.querySelector('#sa-modal-root')?.remove();
   const root = document.createElement('div');
   root.id = 'sa-modal-root';
   root.innerHTML = '<div class="modal-backdrop" data-modal-close="true"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sa-modal-title">' +
