@@ -36,7 +36,7 @@ function Get-ScriptAssystUsers {
     Import-Module ActiveDirectory -ErrorAction Stop
     $escaped = $Query.Replace("'", "''")
     $filter = if ([string]::IsNullOrWhiteSpace($Query)) { '*' } else { "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Department -like '*$escaped*'" }
-    @(Get-ADUser -Filter $filter -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut -ErrorAction Stop |
+    @(Get-ADUser -Filter $filter -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut,Description,GivenName,Surname,DisplayName,UserPrincipalName -ErrorAction Stop |
         Sort-Object Name |
         Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut)
 }
