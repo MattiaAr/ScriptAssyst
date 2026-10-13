@@ -47,10 +47,21 @@ function Get-ScriptAssystGroups {
     Import-Module ActiveDirectory -ErrorAction Stop
     $escaped = $Query.Replace("'", "''")
     $filter = if ([string]::IsNullOrWhiteSpace($Query)) { '*' } else { "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Description -like '*$escaped*'" }
-    $groups = Get-ADGroup -Filter $filter -Properties GroupCategory,GroupScope,Description,DistinguishedName,Member -ErrorAction Stop |
+    $domainSid = (Get-ADDomain -ErrorAction Stop).DomainSID.Value
+    $defaultDomainRids = @(512,513,514,515,516,517,518,519,520,521,522,526,527,553)
+    $groups = Get-ADGroup -Filter $filter -Properties GroupCategory,GroupScope,Description,DistinguishedName,Member,SID -ErrorAction Stop |
         Sort-Object Name |
         Select-Object Name,SamAccountName,GroupCategory,GroupScope,Description,DistinguishedName,
-            @{Name = 'MemberCount'; Expression = { @($_.Member).Count }}
+            @{Name = 'MemberCount'; Expression = { @($_.Member).Count }},
+            @{Name = 'ScriptAssystGroupType'; Expression = {
+                $dn = [string]$_.DistinguishedName
+                $sid = [string]$_.SID.Value
+                $rid = 0
+                if ($sid -match '-(\d+)$') { $rid = [int]$Matches[1] }
+                if ($dn -match '(?i)^CN=[^,]+,CN=Builtin,') { 'Predefinito' }
+                elseif ($sid.StartsWith($domainSid + '-') -and $defaultDomainRids -contains $rid) { 'Predefinito' }
+                else { 'Personalizzato' }
+            }}
     return @($groups)
 }
 
