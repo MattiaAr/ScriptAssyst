@@ -583,7 +583,12 @@ function handleMessage(event) {
        if(expandedGroupOUs.has(key)) expandedGroupOUs.delete(key); else expandedGroupOUs.add(key);
        refreshTree();
      }));
-     const refreshTree=()=>{browser.innerHTML=filteredTree(available,search.value.trim());wireTree();};
+     const refreshTree=()=>{
+       const selected=new Set([...browser.querySelectorAll('[data-available-group-dn]:checked')].map(input=>input.dataset.availableGroupDn));
+       browser.innerHTML=filteredTree(available,search.value.trim());
+       browser.querySelectorAll('[data-available-group-dn]').forEach(input=>{input.checked=selected.has(input.dataset.availableGroupDn);});
+       wireTree();
+     };
      refreshTree();search.addEventListener('input',refreshTree);
      root.querySelector('#sa-save-members').addEventListener('click',()=>{
        const keep=[...root.querySelectorAll('[data-current-member-dn]:checked')].map(x=>x.dataset.currentMemberDn);
