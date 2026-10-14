@@ -4,6 +4,7 @@ const state = {
   status: null,
   metrics: null,
   data: { users: null, groups: null, ous: null, gpos: null, tasks: null },
+  availableGroups: null,
   loading: {},
   errors: {},
   queries: { users: '', groups: '', ous: '', gpos: '', tasks: '' },
@@ -393,7 +394,7 @@ function runUserAction(operation, identity) {
 }
 
 function startCreateUserFlow(){
-  if(!Array.isArray(state.data.groups)) send('groups');
+  if(!Array.isArray(state.availableGroups)) send('availableGroups');
   modalState={flow:'createUserOU',destinationOU:''};
   const ous=Array.isArray(state.data.ous)?state.data.ous:null;
   if(ous){renderCreateUserOuPicker();return;}
@@ -453,7 +454,7 @@ function openUserForm(operation,identity,detail=null){
   const groupPicker=root.querySelector('#sa-create-group-browser');
   const groupButton=root.querySelector('#sa-choose-create-groups');
   const renderGroupPicker=()=>{
-    const all=Array.isArray(state.data.groups)?state.data.groups:[];
+    const all=Array.isArray(state.availableGroups)?state.availableGroups:[];
     const getPath=dn=>String(dn||'').split(/,(?=(?:[^\\]|\\.)*$)/).filter(x=>/^OU=/i.test(x)).map(x=>x.slice(3).replace(/\\,/g,',')).reverse();
     const tree={children:new Map(),groups:[]};
     all.forEach(g=>{const path=getPath(g.DistinguishedName);let n=tree;path.forEach(name=>{if(!n.children.has(name))n.children.set(name,{name,children:new Map(),groups:[]});n=n.children.get(name);});n.groups.push(g);});
@@ -465,12 +466,13 @@ function openUserForm(operation,identity,detail=null){
     groupPicker.querySelector('#sa-create-group-search').addEventListener('input',e=>{const term=e.target.value.toLocaleLowerCase('it');groupPicker.querySelectorAll('[data-create-group-dn]').forEach(input=>{const g=all.find(x=>x.DistinguishedName===input.dataset.createGroupDn);const match=!term||[g?.Name,g?.Description,g?.DistinguishedName].some(v=>String(v||'').toLocaleLowerCase('it').includes(term));input.closest('.group-option').hidden=!match;});});
   };
   groupButton.addEventListener('click',()=>{
-    if(!Array.isArray(state.data.groups)){groupPicker.hidden=false;groupPicker.innerHTML='<p class="modal-hint">Caricamento gruppi dal dominio…</p>';return;}
+    if(!Array.isArray(state.availableGroups)){groupPicker.hidden=false;groupPicker.dataset.waiting='true';groupPicker.innerHTML='<p class="modal-hint">Caricamento gruppi dal dominio…</p>';send('availableGroups');return;}
+    if(groupPicker.dataset.waiting==='true'){groupPicker.dataset.waiting='false';renderGroupPicker();return;}
     groupPicker.hidden=!groupPicker.hidden;
     groupButton.textContent=groupPicker.hidden?'Mostra selezione gruppi':'Nascondi selezione gruppi';
     if(!groupPicker.hidden)renderGroupPicker();
   });
-  if(!Array.isArray(state.data.groups))send('groups');
+  if(!Array.isArray(state.availableGroups))send('availableGroups');
   root.querySelector('#sa-save-user').addEventListener('click',()=>{
     const val=id=>root.querySelector('#'+id)?.value||'';
     if(!isUpdate&&(!val('sa-account').trim()||!destination||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
@@ -703,6 +705,18 @@ function handleMessage(event) {
   if (['createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
     if(result.success){showResultModal('Operazione completata',result.data?.message||'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');state.data.users=null;state.data.groups=null;state.data.ous=null;if(state.page==='users')requestPage('users',state.queries.users||'');if(state.page==='groups')requestPage('groups',state.queries.groups||'');send('dashboard');}
     else showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
+    return;
+  }
+  if (result.operation === 'availableGroups') {
+    if(result.success && Array.isArray(result.data)) {
+      state.availableGroups=result.data;
+      const picker=document.querySelector('#sa-create-group-browser');
+      if(picker && picker.dataset.waiting==='true') document.querySelector('#sa-choose-create-groups')?.click();
+    } else {
+      state.availableGroups=[];
+      const picker=document.querySelector('#sa-create-group-browser');
+      if(picker && picker.dataset.waiting==='true') picker.innerHTML='<div class="modal-error">'+escapeHtml(result.error||'Impossibile caricare i gruppi')+'</div>';
+    }
     return;
   }
   if (result.operation === 'dashboard') {
