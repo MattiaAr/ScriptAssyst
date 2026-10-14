@@ -122,3 +122,7 @@
 
 /* Helper text beneath user form fields */
 .field-description{display:block;margin:-10px 0 15px;color:#8192ad;font-size:10px;line-height:1.45}
+
+/* Slightly wider user creation/edit dialog for the two-column form */
+.modal-card:has(#sa-save-user){width:min(700px,calc(100vw - 32px))}
+@media(max-width:620px){.modal-card:has(#sa-save-user){width:calc(100vw - 24px)}.modal-card:has(#sa-save-user) .form-grid{grid-template-columns:1fr}}
