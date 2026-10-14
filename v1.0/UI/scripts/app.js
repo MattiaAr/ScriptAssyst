@@ -440,7 +440,7 @@ function renderCreateUserOuPicker(){
     openUserForm('createUser','',{path:destination,groups:[]});
   });
 }
-function formField(id,label,value='',type='text',required=false,description=''){return '<label class="modal-label" for="'+id+'">'+label+(required?' *':'')+'</label><input class="modal-input" id="'+id+'" type="'+type+'" value="'+escapeHtml(value||'')+'" '+(required?'required':'')+'>'+(description?'<small class="field-description">'+escapeHtml(description)+'</small>':'');}
+function formField(id,label,value='',type='text',required=false,description=''){return '<div class="form-field"><label class="modal-label" for="'+id+'">'+label+(required?' *':'')+'</label><input class="modal-input" id="'+id+'" type="'+type+'" value="'+escapeHtml(value||'')+'" '+(required?'required':'')+'>'+(description?'<small class="field-description">'+escapeHtml(description)+'</small>':'')+'</div>';}
 function openUserForm(operation,identity,detail=null){
   const row=(state.data.users||[]).find(x=>(x.DistinguishedName||x.SamAccountName)===identity)||{};
   const isCopy=operation==='copyUser', isUpdate=operation==='updateUser', isCreate=operation==='createUser';
