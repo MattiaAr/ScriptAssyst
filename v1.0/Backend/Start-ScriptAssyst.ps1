@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
+    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups')]
     [string]$Operation = 'status',
     [ValidateLength(0,128)]
     [string]$Query = '',
@@ -8,7 +8,8 @@ param(
     [string]$DestinationOU = '',
     [string]$Password = '',
     [bool]$ChangePasswordAtLogon = $false,
-    [switch]$ReadRequestFromStdin
+    [switch]$ReadRequestFromStdin,
+    [string[]]$Groups = @()
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,7 @@ if ($ReadRequestFromStdin) {
     if ($properties.ContainsKey('destinationOU') -and $null -ne $properties['destinationOU']) { $DestinationOU = [string]$properties['destinationOU'] }
     if ($properties.ContainsKey('password') -and $null -ne $properties['password']) { $Password = [string]$properties['password'] }
     if ($properties.ContainsKey('changePasswordAtLogon') -and $null -ne $properties['changePasswordAtLogon']) { $ChangePasswordAtLogon = [bool]$properties['changePasswordAtLogon'] }
+    if ($properties.ContainsKey('groups') -and $null -ne $properties['groups']) { $Groups = @($properties['groups'] | ForEach-Object { [string]$_ }) }
     if ($properties.ContainsKey('password')) { $properties['password'] = $null }
     $properties.Clear()
     $json = $null
@@ -33,7 +35,7 @@ if ($ReadRequestFromStdin) {
 }
 Import-Module (Join-Path $PSScriptRoot 'ScriptAssyst.psm1') -Force
 try {
-    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon | ConvertTo-Json -Depth 8 -Compress
+    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $Password = $null
 }
