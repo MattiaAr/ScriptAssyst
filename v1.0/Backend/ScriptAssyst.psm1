@@ -48,13 +48,10 @@ function Get-ScriptAssystGroups {
     [CmdletBinding()]
     param([string]$Query = '')
     Import-Module ActiveDirectory -ErrorAction Stop
-    $escaped = $Query.Replace("'", "''")
-    $filter = if ([string]::IsNullOrWhiteSpace($Query)) { '*' } else { "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Description -like '*$escaped*'" }
-    $groups = Get-ADGroup -Filter $filter -Properties GroupCategory,GroupScope,Description,DistinguishedName,Member -ErrorAction Stop |
-        Sort-Object Name |
-        Select-Object Name,SamAccountName,GroupCategory,GroupScope,Description,DistinguishedName,
-            @{Name = 'MemberCount'; Expression = { @($_.Member).Count }}
-    return @($groups)
+    $escaped=$Query.Replace("'","''")
+    $filter=if([string]::IsNullOrWhiteSpace($Query)){'*'}else{"Name -like '*$escaped*' -or SamAccountName -like '*$escaped*' -or Description -like '*$escaped*'"}
+    $all=@(Get-ADGroup -Filter $filter -Properties GroupCategory,GroupScope,Description,DistinguishedName,Member,SID -ErrorAction Stop)
+    @(foreach($g in $all | Sort-Object Name){$type=if(Test-ScriptAssystDefaultGroup $g){'Predefinito'}else{'Personalizzato'};[pscustomobject]@{Name=$g.Name;SamAccountName=$g.SamAccountName;GroupCategory=$g.GroupCategory;GroupScope=$g.GroupScope;Description=$g.Description;DistinguishedName=$g.DistinguishedName;MemberCount=@($g.Member).Count;ScriptAssystGroupType=$type}})
 }
 
 function Get-ScriptAssystOUs {
@@ -142,6 +139,62 @@ function Invoke-ScriptAssystUserAction {
     $updated = Get-ADUser -Identity $user.SamAccountName -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut -ErrorAction Stop |
         Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut
     [pscustomobject]@{ message=$message; user=$updated }
+}
+
+function Test-ScriptAssystDefaultGroup {
+    param([Parameter(Mandatory)]$Group)
+    $sid=[string]$Group.SID.Value
+    $builtin=[string]$Group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,'
+    $rid=if($sid -match '-(\d+)$'){[int]$Matches[1]}else{-1}
+    return ($builtin -or (@(498,499,500,501,502,512,513,514,515,516,517,518,519,520,521,522,525,526,527,553,571,572) -contains $rid))
+}
+function Get-ScriptAssystGroupMembers {
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $g=Get-ADGroup -Identity $Identity -Properties Name,DistinguishedName -ErrorAction Stop
+    $members=@(Get-ADGroupMember -Identity $g.DistinguishedName -Recursive:$false -ErrorAction Stop | Sort-Object Name | Select-Object Name,SamAccountName,DistinguishedName,ObjectClass)
+    [pscustomobject]@{group=$g.DistinguishedName;name=$g.Name;members=$members}
+}
+function Update-ScriptAssystGroupMembers {
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Members=@())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $g=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
+    if(Test-ScriptAssystDefaultGroup $g){throw 'I membri dei gruppi predefiniti non possono essere modificati da questa schermata.'}
+    $current=@(Get-ADGroupMember -Identity $g.DistinguishedName -Recursive:$false -ErrorAction Stop);$desired=@{}
+    foreach($entry in @($Members)){
+        if([string]::IsNullOrWhiteSpace([string]$entry)){continue}
+        $obj=$null
+        try{$obj=Get-ADObject -Identity ([string]$entry) -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop}catch{$escaped=([string]$entry).Replace("'","''");$obj=Get-ADObject -Filter "Name -eq '$escaped' -or SamAccountName -eq '$escaped'" -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop | Select-Object -First 1}
+        if(-not $obj){throw "Membro non trovato: '$entry'."};$desired[$obj.DistinguishedName.ToLowerInvariant()]=$obj
+    }
+    $added=[System.Collections.Generic.List[string]]::new();$removed=[System.Collections.Generic.List[string]]::new()
+    foreach($m in $current){if(-not $desired.ContainsKey($m.DistinguishedName.ToLowerInvariant())){Remove-ADGroupMember -Identity $g.DistinguishedName -Members $m.DistinguishedName -Confirm:$false -ErrorAction Stop;$removed.Add($m.Name)}}
+    foreach($key in $desired.Keys){if(-not ($current | Where-Object {$_.DistinguishedName -ieq $desired[$key].DistinguishedName})){Add-ADGroupMember -Identity $g.DistinguishedName -Members $desired[$key].DistinguishedName -ErrorAction Stop;$added.Add($desired[$key].Name)}}
+    [pscustomobject]@{message="Membri aggiornati per '$($g.Name)'. Aggiunti: $($added.Count); rimossi: $($removed.Count).";added=@($added);removed=@($removed)}
+}
+function New-ScriptAssystGroup {
+    param([Parameter(Mandatory)][string]$GroupName,[Parameter(Mandatory)][string]$Path,[string]$Description='',[ValidateSet('Security','Distribution')][string]$GroupCategory='Security',[ValidateSet('Global','Universal','DomainLocal')][string]$GroupScope='Global')
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if([string]::IsNullOrWhiteSpace($GroupName) -or $GroupName.Length -gt 256){throw 'Nome gruppo non valido.'}
+    $ou=Get-ADOrganizationalUnit -Identity $Path -ErrorAction Stop;$escaped=$GroupName.Replace("'","''")
+    if(Get-ADGroup -Filter "Name -eq '$escaped'" -ErrorAction Stop){throw "Esiste già un gruppo con nome '$GroupName'."}
+    New-ADGroup -Name $GroupName -Path $ou.DistinguishedName -GroupCategory $GroupCategory -GroupScope $GroupScope -Description $Description -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo '$GroupName' creato nella OU '$($ou.Name)'."}
+}
+function Update-ScriptAssystGroup {
+    param([Parameter(Mandatory)][string]$Identity,[Parameter(Mandatory)][string]$GroupName,[string]$Description='')
+    Import-Module ActiveDirectory -ErrorAction Stop;$g=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
+    if(Test-ScriptAssystDefaultGroup $g){throw 'I gruppi predefiniti non possono essere modificati da questa schermata.'}
+    Set-ADGroup -Identity $g.DistinguishedName -SamAccountName $GroupName -Description $Description -ErrorAction Stop
+    Rename-ADObject -Identity $g.DistinguishedName -NewName $GroupName -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo aggiornato: '$GroupName'."}
+}
+function Remove-ScriptAssystGroup {
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop;$g=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
+    if(Test-ScriptAssystDefaultGroup $g){throw 'I gruppi predefiniti non possono essere eliminati.'}
+    Remove-ADGroup -Identity $g.DistinguishedName -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo '$($g.Name)' eliminato."}
 }
 
 function Get-ScriptAssystAvailableGroups {
@@ -313,7 +366,7 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups')]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -329,7 +382,11 @@ function Invoke-ScriptAssystRequest {
         [string]$Title = '',
         [string]$Email = '',
         [string]$Description = '',
-        [string]$Path = ''
+        [string]$Path = '',
+        [string]$GroupName = '',
+        [string]$GroupCategory = 'Security',
+        [string]$GroupScope = 'Global',
+        [string[]]$Members = @()
     )
     try {
         $data = switch ($Operation) {
@@ -340,6 +397,11 @@ function Invoke-ScriptAssystRequest {
             'availableGroups' { Get-ScriptAssystAvailableGroups }
             'createUser' { New-ScriptAssystUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'updateUserGroups' { Update-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
+            'groupMembers' { Get-ScriptAssystGroupMembers -Identity $Identity }
+            'updateGroupMembers' { Update-ScriptAssystGroupMembers -Identity $Identity -Members $Members }
+            'createGroup' { New-ScriptAssystGroup -GroupName $GroupName -Path $Path -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
+            'updateGroup' { Update-ScriptAssystGroup -Identity $Identity -GroupName $GroupName -Description $Description }
+            'deleteGroup' { Remove-ScriptAssystGroup -Identity $Identity }
             'groups' { Get-ScriptAssystGroups -Query $Query }
             'ous' { Get-ScriptAssystOUs -Query $Query }
             'gpos' { Get-ScriptAssystGpos -Query $Query }
