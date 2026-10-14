@@ -552,22 +552,38 @@ function handleMessage(event) {
      const attrs=[['Nome',u.Name],['Account',u.SamAccountName],['Creato',u.Created||u.WhenCreated],['Ultima modifica',u.Modified||u.WhenChanged],['Ultimo accesso',u.LastLogonDate],['Ultima modifica password',u.PasswordLastSet],['Tentativi password errati',u.BadPwdCount],['Ultimo tentativo errato',u.LastBadPasswordAttempt],['Bloccato',u.LockedOut?'Sì':'No'],['E-mail',u.Mail],['Descrizione',u.Description],['Distinguished name',u.DistinguishedName]];
      const getOuPath=dn=>String(dn||'').split(/,(?=(?:[^\\]|\\.)*$)/).filter(x=>/^OU=/i.test(x)).map(x=>x.slice(3).replace(/\\,/g,',')).reverse();
      const currentList=()=>groups.map(g=>'<label class="group-option current-group-option"><input type="checkbox" checked data-current-member-dn="'+escapeHtml(g.DistinguishedName)+'"><span><strong>'+escapeHtml(g.Name)+'</strong><small>'+escapeHtml(g.DistinguishedName)+'</small></span></label>').join('')||'<p class="modal-hint">Nessun gruppo di appartenenza restituito da Active Directory.</p>';
+     const expandedGroupOUs=new Set();
      const filteredTree=(items,term)=>{
        const rootNode={name:'',children:new Map(),groups:[]};
-       items.filter(g=>!term||[g.Name,g.Description,g.DistinguishedName].some(v=>String(v||'').toLocaleLowerCase().includes(term.toLocaleLowerCase()))).forEach(g=>{
+       const normalizedTerm=String(term||'').toLocaleLowerCase('it');
+       const filteredItems=items.filter(g=>!normalizedTerm||[g.Name,g.Description,g.DistinguishedName].some(v=>String(v||'').toLocaleLowerCase('it').includes(normalizedTerm)));
+       filteredItems.forEach(g=>{
          const path=getOuPath(g.DistinguishedName);let node=rootNode;
          path.forEach(name=>{if(!node.children.has(name))node.children.set(name,{name,children:new Map(),groups:[]});node=node.children.get(name);});
          node.groups.push(g);
        });
        const countGroups=node=>{if(node._count!==undefined)return node._count;node._count=node.groups.length+[...node.children.values()].reduce((n,c)=>n+countGroups(c),0);return node._count;};
-       const renderNode=node=>'<section class="group-ou-card"><button type="button" class="group-ou-toggle" data-group-ou-toggle><span class="group-ou-chevron">›</span><span class="group-ou-name">'+escapeHtml(node.name||'Gruppi senza OU specificata')+'</span><span class="group-ou-count">'+countGroups(node)+'</span></button><div class="group-ou-content" hidden>'+[...node.children.values()].map(renderNode).join('')+node.groups.map(g=>'<label class="group-option"><input type="checkbox" data-available-group-dn="'+escapeHtml(g.DistinguishedName)+'"><span><strong>'+escapeHtml(g.Name)+'</strong><small>'+escapeHtml(g.Description||g.DistinguishedName)+'</small></span></label>').join('')+'</div></section>';
-       return [...rootNode.children.values()].map(renderNode).join('')+rootNode.groups.map(g=>'<label class="group-option"><input type="checkbox" data-available-group-dn="'+escapeHtml(g.DistinguishedName)+'"><span><strong>'+escapeHtml(g.Name)+'</strong><small>'+escapeHtml(g.Description||g.DistinguishedName)+'</small></span></label>').join('');
+       const groupOptions=groups=>groups.map(g=>'<label class="group-option"><input type="checkbox" data-available-group-dn="'+escapeHtml(g.DistinguishedName)+'"><span><strong>'+escapeHtml(g.Name)+'</strong><small>'+escapeHtml(g.Description||g.DistinguishedName)+'</small></span></label>').join('');
+       const renderNode=node=>{
+         const key=node.name;
+         const open=Boolean(normalizedTerm)||expandedGroupOUs.has(key);
+         const childrenHtml=open?[...node.children.values()].map(renderNode).join('')+groupOptions(node.groups):'';
+         return '<section class="group-ou-card"><button type="button" class="group-ou-toggle '+(open?'is-open':'')+'" data-group-ou-toggle data-group-ou-name="'+escapeHtml(key)+'" aria-expanded="'+open+'"><span class="group-ou-chevron">'+(open?'⌄':'›')+'</span><span class="group-ou-name">'+escapeHtml(node.name)+'</span><span class="group-ou-count">'+countGroups(node)+'</span></button><div class="group-ou-content" '+(open?'':'hidden')+'>'+childrenHtml+'</div></section>';
+       };
+       const ous=[...rootNode.children.values()].map(renderNode).join('');
+       const unplaced=rootNode.groups.length?'<section class="group-ou-card other-groups-card"><button type="button" class="group-ou-toggle '+(normalizedTerm||expandedGroupOUs.has('__other__')?'is-open':'')+'" data-group-ou-toggle data-group-ou-name="__other__" aria-expanded="'+(normalizedTerm||expandedGroupOUs.has('__other__'))+'"><span class="group-ou-chevron">'+(normalizedTerm||expandedGroupOUs.has('__other__')?'⌄':'›')+'</span><span class="group-ou-name">Altri gruppi</span><span class="group-ou-count">'+rootNode.groups.length+'</span></button><div class="group-ou-content" '+(normalizedTerm||expandedGroupOUs.has('__other__')?'':'hidden')+'>'+(normalizedTerm||expandedGroupOUs.has('__other__')?groupOptions(rootNode.groups):'')+'</div></section>':'';
+       return ous+unplaced||'<p class="modal-hint">Nessun gruppo trovato.</p>';
      };
      const body='<div class="detail-grid">'+attrs.map(([k,v])=>'<div class="detail-item"><small>'+escapeHtml(k)+'</small><strong>'+escapeHtml(dateKeys.has(k)?formatAdDate(v):(v??'—'))+'</strong></div>').join('')+'</div><h3 class="modal-section-title">Gruppi attuali</h3><p class="modal-hint">Questi sono i gruppi a cui l’utente appartiene adesso. Deseleziona quelli da rimuovere.</p><div class="group-members-list current-groups-list">'+currentList()+'</div><h3 class="modal-section-title">Aggiungi gruppi personalizzati</h3><p class="modal-hint">Qui compaiono solo i gruppi non predefiniti di Windows. Apri una OU o cerca per nome, descrizione o CN/DN. Seleziona i gruppi da assegnare.</p><input class="modal-input" id="sa-group-search" type="search" placeholder="Cerca nome gruppo, CN o OU..."><div class="group-ou-browser" id="sa-group-browser"><p class="modal-hint">Preparazione elenco gruppi…</p></div><label class="modal-label" for="sa-add-user-groups">Aggiunta manuale (CN, DN o nome, uno per riga)</label><textarea class="modal-input" id="sa-add-user-groups" placeholder="CN=NomeGruppo,OU=Gruppi,DC=homelab,DC=local"></textarea><div class="modal-hint">Usa l’aggiunta manuale per gruppi predefiniti Windows o gruppi non presenti nell’elenco.</div><button class="secondary" id="sa-save-members">Salva appartenenze</button>';
      const root=showModal('Dettaglio utente',u.SamAccountName||'',body,'<button class="secondary" data-modal-cancel>Chiudi</button>');
      const browser=root.querySelector('#sa-group-browser'),search=root.querySelector('#sa-group-search');
-     const wireTree=()=>browser.querySelectorAll('[data-group-ou-toggle]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.group-ou-card').querySelector('.group-ou-content');panel.hidden=!panel.hidden;button.classList.toggle('is-open',!panel.hidden);}));
-     const refreshTree=()=>{browser.innerHTML=filteredTree(available,search.value.trim());wireTree();if(search.value.trim())browser.querySelectorAll('.group-ou-content').forEach(panel=>panel.hidden=false);};
+     const wireTree=()=>browser.querySelectorAll('[data-group-ou-toggle]').forEach(button=>button.addEventListener('click',()=>{
+       const key=button.dataset.groupOuName;
+       if(search.value.trim()) return;
+       if(expandedGroupOUs.has(key)) expandedGroupOUs.delete(key); else expandedGroupOUs.add(key);
+       refreshTree();
+     }));
+     const refreshTree=()=>{browser.innerHTML=filteredTree(available,search.value.trim());wireTree();};
      refreshTree();search.addEventListener('input',refreshTree);
      root.querySelector('#sa-save-members').addEventListener('click',()=>{
        const keep=[...root.querySelectorAll('[data-current-member-dn]:checked')].map(x=>x.dataset.currentMemberDn);
