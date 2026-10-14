@@ -248,8 +248,19 @@ function New-ScriptAssystUser {
     $added = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in @($Groups)) {
         if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
-        $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop
-        $sidText = [string]$group.SID.Value
+        $groupIdentity = [string]$entry
+        try {
+            $group = Get-ADGroup -Identity $groupIdentity -Properties SID,DistinguishedName -ErrorAction Stop
+        } catch {
+            $escapedGroup = $groupIdentity.Replace("'", "''")
+            $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
+            if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
+        }
+        $primaryRid = (Get-ADUser -Identity $created.DistinguishedName -Properties primaryGroupID -ErrorAction Stop).primaryGroupID
+        if ([string]$group.SID.Value.Split('-')[-1] -eq [string]$primaryRid) { continue }
+        $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
+            Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
+        if ($alreadyMember) { continue }
         Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
         $added.Add($group.Name)
     }
