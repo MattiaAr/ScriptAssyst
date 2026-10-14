@@ -103,8 +103,7 @@ function Invoke-ScriptAssystUserAction {
         [Parameter(Mandatory)][string]$Identity,
         [string]$DestinationOU = '',
         [string]$Password = '',
-        [bool]$ChangePasswordAtLogon = $false,
-        [string[]]$Groups = @()
+        [bool]$ChangePasswordAtLogon = $false
     )
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
@@ -155,11 +154,10 @@ function Get-ScriptAssystUserDetails {
         Sort-Object Name |
         Select-Object Name,DistinguishedName)
     # Escludi i gruppi predefiniti Microsoft/Windows riconoscibili dai RID noti.
-    # I gruppi personalizzati restano disponibili anche se si trovano nel container CN=Users.
     $builtInRids = @(498, 500, 501, 502, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 525, 526, 527, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 571, 572, 573, 574)
     $availableGroups = @(Get-ADGroup -Filter * -Properties DistinguishedName,Description,SID -ErrorAction Stop |
         Where-Object {
-            $sidValue = $_.SID.Value
+            $sidValue = [string]$_.SID
             $rid = 0
             if ($sidValue -match '-(\d+)
 }
@@ -179,7 +177,6 @@ function Update-ScriptAssystUserGroups {
         if ($item.Length -gt 1024) { throw 'Identificativo gruppo troppo lungo.' }
         $group = $null
         try { $group = Get-ADGroup -Identity $item -ErrorAction Stop } catch {
-            $escaped = $item.Replace('\','\5c').Replace('(','\28').Replace(')','\29').Replace('*','\2a')
             $name = $item
             if ($item -match '^CN=([^,]+)') { $name = $Matches[1].Replace('\,',',') }
             $safeName = $name.Replace("'","''")
@@ -188,7 +185,7 @@ function Update-ScriptAssystUserGroups {
             elseif ($matches.Count -gt 1) { throw "Il gruppo '$item' non è univoco: specificare il Distinguished Name completo." }
             else { throw "Gruppo non trovato: $item" }
         }
-        if ($resolved.DistinguishedName -notcontains $group.DistinguishedName) { $resolved += $group }
+        if (@($resolved | Where-Object { $_.DistinguishedName -eq $group.DistinguishedName }).Count -eq 0) { $resolved += $group }
     }
     $current = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop)
     $targetDns = @($resolved | ForEach-Object { $_.DistinguishedName })
@@ -216,7 +213,8 @@ function Invoke-ScriptAssystRequest {
         [string]$Identity = '',
         [string]$DestinationOU = '',
         [string]$Password = '',
-        [bool]$ChangePasswordAtLogon = $false
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @()
     )
     try {
         $data = switch ($Operation) {
