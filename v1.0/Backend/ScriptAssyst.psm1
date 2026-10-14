@@ -141,6 +141,255 @@ function Invoke-ScriptAssystUserAction {
     [pscustomobject]@{ message=$message; user=$updated }
 }
 
+function Resolve-ScriptAssystGroup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 1024) {
+        throw 'Identità gruppo non valida.'
+    }
+    try {
+        return Get-ADGroup -Identity $Identity -Properties SID,DistinguishedName,GroupScope,GroupCategory -ErrorAction Stop
+    } catch {
+        $escaped = $Identity.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([string][char]0, '\00')
+        $matches = @(Get-ADGroup -LDAPFilter "(name=$escaped)" -Properties SID,DistinguishedName,GroupScope,GroupCategory -ErrorAction Stop)
+        if ($matches.Count -eq 1) { return $matches[0] }
+        if ($matches.Count -gt 1) { throw "Il nome gruppo '$Identity' non è univoco. Specificare CN o DN." }
+        throw "Gruppo '$Identity' non trovato in Active Directory."
+    }
+}
+
+function Update-ScriptAssystUserGroups {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Identity,
+        [string[]]$Groups = @()
+    )
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
+    $user = Get-ADUser -Identity $Identity -Properties memberOf,primaryGroupID,DistinguishedName,SamAccountName -ErrorAction Stop
+    $currentDns = @($user.memberOf | ForEach-Object { [string]$_ })
+    $desired = @{}
+    foreach ($entry in @($Groups)) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        $group = Resolve-ScriptAssystGroup -Identity ([string]$entry)
+        $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
+    }
+
+    $added = [System.Collections.Generic.List[string]]::new()
+    $removed = [System.Collections.Generic.List[string]]::new()
+    $unchangedProtected = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($dn in $currentDns) {
+        $key = $dn.ToLowerInvariant()
+        if ($desired.ContainsKey($key)) { continue }
+        $group = Get-ADGroup -Identity $dn -Properties SID,DistinguishedName -ErrorAction Stop
+        $sidText = [string]$group.SID.Value
+        $isBuiltin = $dn -match '(?i)^CN=[^,]+,CN=Builtin,'
+        $isProtectedRid = $sidText -match '-(500|501|502|512|513|514|515|516|517|518|519|520|521|522|525|526|527|544|545|546|547|548|549|550|551|552|553|554|555|556|557|558|559|560|561|562|568|569|571|572)
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) {
+        throw 'Identità utente non valida.'
+    }
+    $user = Get-ADUser -Identity $Identity -Properties WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName,SamAccountName -ErrorAction Stop
+    $details = $user | Select-Object Name,SamAccountName,WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName
+    $groups = @()
+    foreach ($groupDn in @($user.memberOf)) {
+        $group = Get-ADGroup -Identity $groupDn -Properties DistinguishedName -ErrorAction Stop
+        $groups += [pscustomobject]@{ Name=$group.Name; DistinguishedName=$group.DistinguishedName }
+    }
+    $availableGroups = @(Get-ADGroup -Filter * -Properties Description,DistinguishedName,SID,GroupCategory,GroupScope |
+        Where-Object {
+            $_.DistinguishedName -notmatch '(?i)^CN=[^,]+,CN=Builtin,' -and
+            [string]$_.SID.Value -notmatch '-(500|501|502|512|513|514|515|516|517|518|519|520|521|522|525|526|527|544|545|546|547|548|549|550|551|552|553|554|555|556|557|558|559|560|561|562|568|569|571|572)
+}
+
+function Invoke-ScriptAssystRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @()
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-ScriptAssystStatus }
+            'dashboard' { Get-ScriptAssystDashboard }
+            'users' { Get-ScriptAssystUsers -Query $Query }
+            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'updateUserGroups' { Update-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
+            'groups' { Get-ScriptAssystGroups -Query $Query }
+            'ous' { Get-ScriptAssystOUs -Query $Query }
+            'gpos' { Get-ScriptAssystGpos -Query $Query }
+            'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
+            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+
+        $isPrimary = ([string]$group.SID.AccountDomainSid -eq [string]$user.SID.AccountDomainSid) -and ([int]($sidText.Split('-')[-1]) -eq [int]$user.primaryGroupID)
+        if ($isBuiltin -or $isProtectedRid -or $isPrimary) {
+            $unchangedProtected.Add($group.Name)
+            continue
+        }
+        Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $removed.Add($group.Name)
+    }
+
+    foreach ($key in @($desired.Keys)) {
+        $group = $desired[$key]
+        if ($currentDns -contains $group.DistinguishedName) { continue }
+        Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $added.Add($group.Name)
+    }
+
+    [pscustomobject]@{
+        message = "Appartenenze aggiornate per $($user.SamAccountName). Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        user = $user.SamAccountName
+        added = @($added)
+        removed = @($removed)
+        protected = @($unchangedProtected)
+    }
+}
+
+function Get-ScriptAssystUserDetails {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) {
+        throw 'Identità utente non valida.'
+    }
+    $user = Get-ADUser -Identity $Identity -Properties WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName,SamAccountName -ErrorAction Stop
+    $details = $user | Select-Object Name,SamAccountName,WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName
+    $groups = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop |
+        Sort-Object Name |
+        Select-Object Name,DistinguishedName)
+    [pscustomobject]@{ user=$details; groups=$groups }
+}
+
+function Invoke-ScriptAssystRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-ScriptAssystStatus }
+            'dashboard' { Get-ScriptAssystDashboard }
+            'users' { Get-ScriptAssystUsers -Query $Query }
+            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'groups' { Get-ScriptAssystGroups -Query $Query }
+            'ous' { Get-ScriptAssystOUs -Query $Query }
+            'gpos' { Get-ScriptAssystGpos -Query $Query }
+            'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
+            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+ -and
+            $_.DistinguishedName -notmatch '(?i)^CN=(Domain Admins|Domain Users|Domain Guests|Domain Computers|Domain Controllers|Schema Admins|Enterprise Admins|Group Policy Creator Owners|Read-only Domain Controllers),CN=Users,'
+        } |
+        Sort-Object DistinguishedName |
+        Select-Object Name,Description,DistinguishedName,GroupCategory,GroupScope)
+    [pscustomobject]@{ user=$details; groups=@($groups | Sort-Object Name); availableGroups=$availableGroups }
+}
+
+function Invoke-ScriptAssystRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-ScriptAssystStatus }
+            'dashboard' { Get-ScriptAssystDashboard }
+            'users' { Get-ScriptAssystUsers -Query $Query }
+            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'groups' { Get-ScriptAssystGroups -Query $Query }
+            'ous' { Get-ScriptAssystOUs -Query $Query }
+            'gpos' { Get-ScriptAssystGpos -Query $Query }
+            'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
+            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+
+        $isPrimary = ([string]$group.SID.AccountDomainSid -eq [string]$user.SID.AccountDomainSid) -and ([int]($sidText.Split('-')[-1]) -eq [int]$user.primaryGroupID)
+        if ($isBuiltin -or $isProtectedRid -or $isPrimary) {
+            $unchangedProtected.Add($group.Name)
+            continue
+        }
+        Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $removed.Add($group.Name)
+    }
+
+    foreach ($key in @($desired.Keys)) {
+        $group = $desired[$key]
+        if ($currentDns -contains $group.DistinguishedName) { continue }
+        Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $added.Add($group.Name)
+    }
+
+    [pscustomobject]@{
+        message = "Appartenenze aggiornate per $($user.SamAccountName). Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        user = $user.SamAccountName
+        added = @($added)
+        removed = @($removed)
+        protected = @($unchangedProtected)
+    }
+}
+
 function Get-ScriptAssystUserDetails {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity)
