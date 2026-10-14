@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups')]
+    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
     [string]$Operation = 'status',
     [ValidateLength(0,128)]
     [string]$Query = '',
@@ -18,7 +18,11 @@ param(
     [string]$Title = '',
     [string]$Email = '',
     [string]$Description = '',
-    [string]$Path = ''
+    [string]$Path = '',
+    [string]$GroupName = '',
+    [string]$GroupCategory = 'Security',
+    [string]$GroupScope = 'Global',
+    [string[]]$Members = @()
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -44,6 +48,10 @@ if ($ReadRequestFromStdin) {
     if ($properties.ContainsKey('email') -and $null -ne $properties['email']) { $Email = [string]$properties['email'] }
     if ($properties.ContainsKey('description') -and $null -ne $properties['description']) { $Description = [string]$properties['description'] }
     if ($properties.ContainsKey('path') -and $null -ne $properties['path']) { $Path = [string]$properties['path'] }
+    if ($properties.ContainsKey('groupName') -and $null -ne $properties['groupName']) { $GroupName = [string]$properties['groupName'] }
+    if ($properties.ContainsKey('groupCategory') -and $null -ne $properties['groupCategory']) { $GroupCategory = [string]$properties['groupCategory'] }
+    if ($properties.ContainsKey('groupScope') -and $null -ne $properties['groupScope']) { $GroupScope = [string]$properties['groupScope'] }
+    if ($properties.ContainsKey('members') -and $null -ne $properties['members']) { $Members = @($properties['members'] | ForEach-Object { [string]$_ }) }
     if ($properties.ContainsKey('password')) { $properties['password'] = $null }
     $properties.Clear()
     $json = $null
@@ -53,7 +61,7 @@ if ($ReadRequestFromStdin) {
 }
 Import-Module (Join-Path $PSScriptRoot 'ScriptAssyst.psm1') -Force
 try {
-    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path | ConvertTo-Json -Depth 8 -Compress
+    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $Password = $null
 }
