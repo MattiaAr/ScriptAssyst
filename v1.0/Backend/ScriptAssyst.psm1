@@ -249,39 +249,4 @@ Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
     [pscustomobject]@{ user=$details; groups=$groups; availableGroups=$availableGroups }
 }
 
-function Invoke-ScriptAssystRequest {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
-        [string]$Operation,
-        [ValidateLength(0,128)][string]$Query = '',
-        [string]$Identity = '',
-        [string]$DestinationOU = '',
-        [string]$Password = '',
-        [bool]$ChangePasswordAtLogon = $false
-    )
-    try {
-        $data = switch ($Operation) {
-            'status' { Get-ScriptAssystStatus }
-            'dashboard' { Get-ScriptAssystDashboard }
-            'users' { Get-ScriptAssystUsers -Query $Query }
-            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
-            'groups' { Get-ScriptAssystGroups -Query $Query }
-            'ous' { Get-ScriptAssystOUs -Query $Query }
-            'gpos' { Get-ScriptAssystGpos -Query $Query }
-            'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
-            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
-            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
-            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
-            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
-        }
-        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
-    } catch {
-        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
-    } finally {
-        if ($Password) { $Password = $null }
-    }
-}
-
 Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
