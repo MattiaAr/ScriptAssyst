@@ -126,3 +126,9 @@
 /* Slightly wider user creation/edit dialog for the two-column form */
 .modal-card:has(#sa-save-user){width:min(700px,calc(100vw - 32px))}
 @media(max-width:620px){.modal-card:has(#sa-save-user){width:calc(100vw - 24px)}.modal-card:has(#sa-save-user) .form-grid{grid-template-columns:1fr}}
+
+/* User form: place each complete field on its own row */
+.modal-card:has(#sa-save-user) .form-grid{grid-template-columns:minmax(0,1fr);gap:0}
+.modal-card:has(#sa-save-user) .form-field{min-width:0}
+.modal-card:has(#sa-save-user) .form-field .modal-input{margin-bottom:16px}
+.modal-card:has(#sa-save-user) .field-description{margin-top:-10px;margin-bottom:15px}
