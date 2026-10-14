@@ -250,9 +250,6 @@ function New-ScriptAssystUser {
         if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
         $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop
         $sidText = [string]$group.SID.Value
-        $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
-            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
-        if ($protected) { continue }
         Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
         $added.Add($group.Name)
     }
