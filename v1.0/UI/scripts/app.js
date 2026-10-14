@@ -749,6 +749,8 @@ function handleMessage(event) {
   if (result.success && Array.isArray(result.data)) {
     state.data[page] = result.data;
     state.errors[page] = null;
+    if (page === 'ous' && modalState?.flow === 'createGroupOU') { renderCreateGroupOuPicker(); return; }
+    if (page === 'ous' && modalState?.flow === 'createUserOU') { renderCreateUserOuPicker(); return; }
     if (page === 'ous' && modalState?.flow === 'createUserOU') renderCreateUserOuPicker();
     else if (page === 'ous' && modalState && !modalState.destinationOU) renderOuPicker();
   } else {
