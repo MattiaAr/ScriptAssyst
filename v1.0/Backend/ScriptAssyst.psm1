@@ -103,7 +103,8 @@ function Invoke-ScriptAssystUserAction {
         [Parameter(Mandatory)][string]$Identity,
         [string]$DestinationOU = '',
         [string]$Password = '',
-        [bool]$ChangePasswordAtLogon = $false
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @()
     )
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
@@ -163,11 +164,53 @@ function Get-ScriptAssystUserDetails {
             if ($sidValue -match '-(\d+)
 }
 
+function Update-ScriptAssystUserGroups {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Identity,
+        [string[]]$Groups = @()
+    )
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
+    $user = Get-ADUser -Identity $Identity -Properties DistinguishedName,SamAccountName -ErrorAction Stop
+    $requested = @($Groups | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    $resolved = @()
+    foreach ($item in $requested) {
+        if ($item.Length -gt 1024) { throw 'Identificativo gruppo troppo lungo.' }
+        $group = $null
+        try { $group = Get-ADGroup -Identity $item -ErrorAction Stop } catch {
+            $escaped = $item.Replace('\','\5c').Replace('(','\28').Replace(')','\29').Replace('*','\2a')
+            $name = $item
+            if ($item -match '^CN=([^,]+)') { $name = $Matches[1].Replace('\,',',') }
+            $safeName = $name.Replace("'","''")
+            $matches = @(Get-ADGroup -Filter "Name -eq '$safeName' -or SamAccountName -eq '$safeName'" -ErrorAction Stop)
+            if ($matches.Count -eq 1) { $group = $matches[0] }
+            elseif ($matches.Count -gt 1) { throw "Il gruppo '$item' non è univoco: specificare il Distinguished Name completo." }
+            else { throw "Gruppo non trovato: $item" }
+        }
+        if ($resolved.DistinguishedName -notcontains $group.DistinguishedName) { $resolved += $group }
+    }
+    $current = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop)
+    $targetDns = @($resolved | ForEach-Object { $_.DistinguishedName })
+    foreach ($group in $current) {
+        if ($targetDns -notcontains $group.DistinguishedName) {
+            Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        }
+    }
+    $currentDns = @($current | ForEach-Object { $_.DistinguishedName })
+    foreach ($group in $resolved) {
+        if ($currentDns -notcontains $group.DistinguishedName) {
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop
+        }
+    }
+    [pscustomobject]@{ message="Appartenenze ai gruppi aggiornate per $($user.SamAccountName)."; user=$user.SamAccountName; groups=@($resolved | Select-Object Name,DistinguishedName) }
+}
+
 function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -181,6 +224,7 @@ function Invoke-ScriptAssystRequest {
             'dashboard' { Get-ScriptAssystDashboard }
             'users' { Get-ScriptAssystUsers -Query $Query }
             'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'updateUserGroups' { Update-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
             'groups' { Get-ScriptAssystGroups -Query $Query }
             'ous' { Get-ScriptAssystOUs -Query $Query }
             'gpos' { Get-ScriptAssystGpos -Query $Query }
