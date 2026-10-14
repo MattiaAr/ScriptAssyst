@@ -132,3 +132,7 @@
 .modal-card:has(#sa-save-user) .form-field{min-width:0}
 .modal-card:has(#sa-save-user) .form-field .modal-input{margin-bottom:16px}
 .modal-card:has(#sa-save-user) .field-description{margin-top:-10px;margin-bottom:15px}
+
+/* Button users: wider and less tall */
+.toolbar-actions [data-create-user]{min-width:136px;min-height:30px;padding:6px 18px;line-height:1.1}
+.directory-tag.default-tag{background:#302c43;border-color:#75668f;color:#d6c8f5}.directory-tag.custom-tag{background:#183b37;border-color:#477c70;color:#a5e8d8}
