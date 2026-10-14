@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser')]
+    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups')]
     [string]$Operation = 'status',
     [ValidateLength(0,128)]
     [string]$Query = '',
