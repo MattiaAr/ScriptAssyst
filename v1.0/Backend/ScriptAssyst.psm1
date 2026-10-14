@@ -205,8 +205,10 @@ function New-ScriptAssystUser {
     $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
     if (Get-ADUser -Filter "SamAccountName -eq '$($Identity.Replace("'","''"))'" -ErrorAction Stop) { throw "Esiste già un account con nome '$Identity'." }
     $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+    $accountName = if ($DisplayName) { $DisplayName } else { (($GivenName + ' ' + $Surname).Trim()) }
+    if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = $Identity }
     $params = @{
-        Name = if ($DisplayName) { $DisplayName } else { (($GivenName + ' ' + $Surname).Trim()) }
+        Name = $accountName
         SamAccountName = $Identity
         Path = $ou.DistinguishedName
         AccountPassword = $securePassword
