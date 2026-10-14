@@ -153,7 +153,10 @@ function Get-ScriptAssystUserDetails {
     $groups = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop |
         Sort-Object Name |
         Select-Object Name,DistinguishedName)
-    [pscustomobject]@{ user=$details; groups=$groups }
+    $availableGroups = @(Get-ADGroup -Filter * -Properties DistinguishedName,Description -ErrorAction Stop |
+        Sort-Object Name |
+        Select-Object Name,Description,DistinguishedName)
+    [pscustomobject]@{ user=$details; groups=$groups; availableGroups=$availableGroups }
 }
 
 function Invoke-ScriptAssystRequest {
