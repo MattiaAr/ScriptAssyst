@@ -118,3 +118,7 @@
 #sa-create-group-browser[hidden]{display:none}
 #sa-create-group-browser .group-ou-card{margin-bottom:6px;border:1px solid #2a3b54;border-radius:7px;overflow:hidden}
 #sa-create-group-tree>.group-option{margin-left:8px}
+
+
+/* Helper text beneath user form fields */
+.field-description{display:block;margin:-10px 0 15px;color:#8192ad;font-size:10px;line-height:1.45}
