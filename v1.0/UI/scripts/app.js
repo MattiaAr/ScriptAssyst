@@ -548,7 +548,7 @@ function handleMessage(event) {
        const date=value instanceof Date?value:new Date(value);
        return Number.isNaN(date.getTime())?'—':date.toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
      };
-     const dateKeys=new Set(['Created','WhenCreated','Modified','WhenChanged','LastLogonDate','PasswordLastSet','LastBadPasswordAttempt']);
+     const dateKeys=new Set(['Creato','Ultima modifica','Ultimo accesso','Ultima modifica password','Ultimo tentativo errato']);
      const attrs=[['Nome',u.Name],['Account',u.SamAccountName],['Creato',u.Created||u.WhenCreated],['Ultima modifica',u.Modified||u.WhenChanged],['Ultimo accesso',u.LastLogonDate],['Ultima modifica password',u.PasswordLastSet],['Tentativi password errati',u.BadPwdCount],['Ultimo tentativo errato',u.LastBadPasswordAttempt],['Bloccato',u.LockedOut?'Sì':'No'],['E-mail',u.Mail],['Descrizione',u.Description],['Distinguished name',u.DistinguishedName]];
      const currentDns=new Set(groups.map(g=>g.DistinguishedName));
      const getOuPath=dn=>String(dn||'').split(/,(?=(?:[^\\]|\\.)*$)/).filter(x=>/^OU=/i.test(x)).map(x=>x.slice(3).replace(/\\,/g,',')).reverse();
