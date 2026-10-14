@@ -148,7 +148,7 @@ function Get-ScriptAssystUserDetails {
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) {
         throw 'Identità utente non valida.'
     }
-    $user = Get-ADUser -Identity $Identity -Properties WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName,SamAccountName -ErrorAction Stop
+    $user = Get-ADUser -Identity $Identity -Properties WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName,SamAccountName,memberOf -ErrorAction Stop
     $details = $user | Select-Object Name,SamAccountName,WhenCreated,WhenChanged,LastLogonDate,PasswordLastSet,BadPwdCount,LastBadPasswordAttempt,LockedOut,Mail,Description,DistinguishedName
     $groups = @(foreach ($groupDn in @($user.memberOf)) { $group = Get-ADGroup -Identity $groupDn -Properties DistinguishedName -ErrorAction Stop; [pscustomobject]@{ Name=$group.Name; DistinguishedName=$group.DistinguishedName } })
     $availableGroups = @(Get-ADGroup -Filter * -Properties Description,DistinguishedName,SID,GroupCategory,GroupScope -ErrorAction Stop | Where-Object { $_.DistinguishedName -notmatch '(?i)^CN=[^,]+,CN=Builtin,' -and [string]$_.SID.Value -notmatch '-(500|501|502|512|513|514|515|516|517|518|519|520|521|522|525|526|527|544|545|546|547|548|549|550|551|552|553|554|555|556|557|558|559|560|561|562|568|569|571|572)
