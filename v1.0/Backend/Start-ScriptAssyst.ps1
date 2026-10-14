@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups')]
+    [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser')]
     [string]$Operation = 'status',
     [ValidateLength(0,128)]
     [string]$Query = '',
@@ -9,7 +9,16 @@ param(
     [string]$Password = '',
     [bool]$ChangePasswordAtLogon = $false,
     [switch]$ReadRequestFromStdin,
-    [string[]]$Groups = @()
+    [string[]]$Groups = @(),
+    [string]$GivenName = '',
+    [string]$Surname = '',
+    [string]$DisplayName = '',
+    [string]$UserPrincipalName = '',
+    [string]$Department = '',
+    [string]$Title = '',
+    [string]$Email = '',
+    [string]$Description = '',
+    [string]$Path = ''
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -26,6 +35,15 @@ if ($ReadRequestFromStdin) {
     if ($properties.ContainsKey('password') -and $null -ne $properties['password']) { $Password = [string]$properties['password'] }
     if ($properties.ContainsKey('changePasswordAtLogon') -and $null -ne $properties['changePasswordAtLogon']) { $ChangePasswordAtLogon = [bool]$properties['changePasswordAtLogon'] }
     if ($properties.ContainsKey('groups') -and $null -ne $properties['groups']) { $Groups = @($properties['groups'] | ForEach-Object { [string]$_ }) }
+    if ($properties.ContainsKey('givenName') -and $null -ne $properties['givenName']) { $GivenName = [string]$properties['givenName'] }
+    if ($properties.ContainsKey('surname') -and $null -ne $properties['surname']) { $Surname = [string]$properties['surname'] }
+    if ($properties.ContainsKey('displayName') -and $null -ne $properties['displayName']) { $DisplayName = [string]$properties['displayName'] }
+    if ($properties.ContainsKey('userPrincipalName') -and $null -ne $properties['userPrincipalName']) { $UserPrincipalName = [string]$properties['userPrincipalName'] }
+    if ($properties.ContainsKey('department') -and $null -ne $properties['department']) { $Department = [string]$properties['department'] }
+    if ($properties.ContainsKey('title') -and $null -ne $properties['title']) { $Title = [string]$properties['title'] }
+    if ($properties.ContainsKey('email') -and $null -ne $properties['email']) { $Email = [string]$properties['email'] }
+    if ($properties.ContainsKey('description') -and $null -ne $properties['description']) { $Description = [string]$properties['description'] }
+    if ($properties.ContainsKey('path') -and $null -ne $properties['path']) { $Path = [string]$properties['path'] }
     if ($properties.ContainsKey('password')) { $properties['password'] = $null }
     $properties.Clear()
     $json = $null
@@ -35,7 +53,7 @@ if ($ReadRequestFromStdin) {
 }
 Import-Module (Join-Path $PSScriptRoot 'ScriptAssyst.psm1') -Force
 try {
-    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups | ConvertTo-Json -Depth 8 -Compress
+    Invoke-ScriptAssystRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $Password = $null
 }
