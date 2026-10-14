@@ -153,7 +153,55 @@ function Get-ScriptAssystUserDetails {
     $groups = @(Get-ADPrincipalGroupMembership -Identity $user.DistinguishedName -ErrorAction Stop |
         Sort-Object Name |
         Select-Object Name,DistinguishedName)
-    $availableGroups = @(Get-ADGroup -Filter * -Properties DistinguishedName,Description -ErrorAction Stop |
+    # Escludi i gruppi predefiniti Microsoft/Windows riconoscibili dai RID noti.
+    # I gruppi personalizzati restano disponibili anche se si trovano nel container CN=Users.
+    $builtInRids = @(498, 500, 501, 502, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 525, 526, 527, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 571, 572, 573, 574)
+    $availableGroups = @(Get-ADGroup -Filter * -Properties DistinguishedName,Description,SID -ErrorAction Stop |
+        Where-Object {
+            $sidValue = $_.SID.Value
+            $rid = 0
+            if ($sidValue -match '-(\d+)
+}
+
+function Invoke-ScriptAssystRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-ScriptAssystStatus }
+            'dashboard' { Get-ScriptAssystDashboard }
+            'users' { Get-ScriptAssystUsers -Query $Query }
+            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'groups' { Get-ScriptAssystGroups -Query $Query }
+            'ous' { Get-ScriptAssystOUs -Query $Query }
+            'gpos' { Get-ScriptAssystGpos -Query $Query }
+            'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
+            'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-ScriptAssystStatus, Invoke-ScriptAssystRequest
+) { $rid = [int]$Matches[1] }
+            $rid -notin $builtInRids
+        } |
         Sort-Object Name |
         Select-Object Name,Description,DistinguishedName)
     [pscustomobject]@{ user=$details; groups=$groups; availableGroups=$availableGroups }
