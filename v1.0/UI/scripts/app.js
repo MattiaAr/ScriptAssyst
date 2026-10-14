@@ -392,22 +392,89 @@ function runUserAction(operation, identity) {
   }
 }
 
+function startCreateUserFlow(){
+  modalState={flow:'createUserOU',destinationOU:''};
+  const ous=Array.isArray(state.data.ous)?state.data.ous:null;
+  if(ous){renderCreateUserOuPicker();return;}
+  showModal('Seleziona OU','Caricamento della struttura Active Directory…','<div class="modal-loading">Lettura delle unità organizzative dal dominio…</div>','<button class="secondary" data-modal-cancel>Annulla</button>');
+  send('ous');
+}
+function renderCreateUserOuPicker(){
+  if(!modalState||modalState.flow!=='createUserOU')return;
+  const ous=Array.isArray(state.data.ous)?state.data.ous:[];
+  const byDn=new Map(ous.map(ou=>[String(ou.DistinguishedName||'').toLowerCase(),ou]));
+  const children=new Map(),roots=[];
+  ous.forEach(ou=>{
+    const parent=String(ou.DistinguishedName||'').split(/,(?=(?:[^\\]|\\.)*$)/).slice(1).join(',').toLowerCase();
+    if(byDn.has(parent)){if(!children.has(parent))children.set(parent,[]);children.get(parent).push(ou);}else roots.push(ou);
+  });
+  const selected=modalState.destinationOU;
+  const renderNode=(ou,depth=0)=>{
+    const dn=String(ou.DistinguishedName||''),kids=children.get(dn.toLowerCase())||[];
+    return '<div class="create-ou-node" style="--ou-depth:'+depth+'"><button type="button" class="create-ou-choice '+(selected===dn?'selected':'')+'" data-create-ou-dn="'+escapeHtml(dn)+'"><span class="ou-tree-icon">▤</span><span><strong>'+escapeHtml(ou.Name)+'</strong><small>'+escapeHtml(dn)+'</small></span><span class="ou-tree-check">'+(selected===dn?'Selezionata':'Seleziona')+'</span></button>'+(kids.length?'<div class="create-ou-children">'+kids.sort((a,b)=>a.Name.localeCompare(b.Name,'it')).map(k=>renderNode(k,depth+1)).join('')+'</div>':'')+'</div>';
+  };
+  const body='<p class="modal-hint">Scegli l’unità organizzativa in cui creare il nuovo account.</p><input class="modal-input" id="sa-create-ou-search" type="search" placeholder="Cerca OU per nome o DN…"><div class="create-ou-tree" id="sa-create-ou-tree">'+(roots.length?roots.sort((a,b)=>a.Name.localeCompare(b.Name,'it')).map(ou=>renderNode(ou)).join(''):'<div class="modal-hint">Nessuna OU restituita dal dominio.</div>')+'</div>';
+  const root=showModal('Seleziona OU','La selezione verrà passata al modulo di creazione utente.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-create-ou-confirm" '+(selected?'':'disabled')+'>Continua</button>');
+  root.querySelectorAll('[data-create-ou-dn]').forEach(button=>button.addEventListener('click',()=>{
+    modalState.destinationOU=button.dataset.createOuDn;
+    root.querySelectorAll('[data-create-ou-dn]').forEach(x=>x.classList.toggle('selected',x===button));
+    root.querySelectorAll('[data-create-ou-dn] .ou-tree-check').forEach(x=>x.textContent='Seleziona');
+    button.querySelector('.ou-tree-check').textContent='Selezionata';
+    root.querySelector('#sa-create-ou-confirm').disabled=false;
+  }));
+  root.querySelector('#sa-create-ou-search').addEventListener('input',event=>{
+    const term=event.target.value.toLocaleLowerCase('it');
+    root.querySelectorAll('[data-create-ou-dn]').forEach(button=>{
+      const node=button.closest('.create-ou-node');
+      const match=!term||button.textContent.toLocaleLowerCase('it').includes(term);
+      node.hidden=!match;
+    });
+  });
+  root.querySelector('#sa-create-ou-confirm').addEventListener('click',()=>{
+    const destination=modalState?.destinationOU;
+    if(!destination)return;
+    modalState={flow:'createUserForm',destinationOU:destination};
+    openUserForm('createUser','',{path:destination,groups:[]});
+  });
+}
 function formField(id,label,value='',type='text',required=false){return '<label class="modal-label" for="'+id+'">'+label+(required?' *':'')+'</label><input class="modal-input" id="'+id+'" type="'+type+'" value="'+escapeHtml(value||'')+'" '+(required?'required':'')+'>';}
 function openUserForm(operation,identity,detail=null){
   const row=(state.data.users||[]).find(x=>(x.DistinguishedName||x.SamAccountName)===identity)||{};
-  const isCopy=operation==='copyUser', isUpdate=operation==='updateUser';
+  const isCopy=operation==='copyUser', isUpdate=operation==='updateUser', isCreate=operation==='createUser';
   const title=isCopy?'Copia utente':isUpdate?'Modifica utente':'Crea utente';
   const source=detail||row;
-  const body='<div class="form-grid">'+formField('sa-given','Nome',source.GivenName)+formField('sa-surname','Cognome',source.Surname)+formField('sa-display','Nome visualizzato',source.DisplayName||source.Name)+formField('sa-account',isCopy?'Nuovo nome account':'Nome account',isCopy?'':source.SamAccountName,'text',!isUpdate)+formField('sa-upn','User Principal Name',isCopy?'':source.UserPrincipalName,'text',false)+formField('sa-ou','OU DN di destinazione',isCopy?'':(source.DistinguishedName||'').split(',').slice(1).join(','),'text',!isUpdate)+formField('sa-department','Reparto',source.Department)+formField('sa-title','Titolo',source.Title)+formField('sa-email','E-mail',source.Mail||source.Email)+formField('sa-description','Descrizione',source.Description)+(!isUpdate?formField('sa-new-password','Password iniziale','','password',true):'')+'</div><label class="modal-label" for="sa-groups">Gruppi (un DN o nome per riga)</label><textarea class="modal-input" id="sa-groups" placeholder="CN=Gruppo,OU=...">'+escapeHtml((detail?.groups||[]).map(g=>g.DistinguishedName).join('\n'))+'</textarea><div class="modal-hint">Se copi un utente e lasci vuota la lista dei gruppi, vengono replicate le appartenenze dell’account originale (escluso il gruppo primario predefinito). Inserendo DN o nomi, verrà usata la lista indicata. La password deve rispettare la policy del dominio.</div>';
-  const root=showModal(title,isCopy?'Crea un account distinto copiando gli attributi selezionati.':isUpdate?'Aggiorna gli attributi dell’account.':'Crea un account nella OU selezionata.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-user">Salva</button>');
+  const destination=isCreate?(modalState?.destinationOU||source.path||''):(isCopy?'':(source.DistinguishedName||'').split(',').slice(1).join(','));
+  const body='<div class="choice-panel"><strong>OU di destinazione</strong><p>'+escapeHtml(destination||'Non selezionata')+'</p>'+(isCreate?'<button type="button" class="text-button" id="sa-change-create-ou">Cambia OU</button>':'')+'</div><div class="form-grid">'+formField('sa-given','Nome',source.GivenName,'text',isCreate)+formField('sa-surname','Cognome',source.Surname,'text',isCreate)+formField('sa-display','Nome visualizzato',source.DisplayName||source.Name)+formField('sa-account',isCopy?'Nuovo nome account':'Nome account',isCopy?'':source.SamAccountName,'text',!isUpdate)+formField('sa-upn','User Principal Name',isCopy?'':source.UserPrincipalName,'text',false)+formField('sa-ou','OU DN di destinazione',destination,'text',!isUpdate)+formField('sa-department','Reparto',source.Department)+formField('sa-title','Titolo',source.Title)+formField('sa-email','E-mail',source.Mail||source.Email)+formField('sa-description','Descrizione',source.Description)+(!isUpdate?formField('sa-new-password','Password iniziale','','password',true):'')+'</div><h3 class="modal-section-title">Gruppi da assegnare</h3><div id="sa-create-selected-groups" class="group-members-list"><p class="modal-hint">Nessun gruppo selezionato.</p></div><button type="button" class="secondary" id="sa-choose-create-groups">Seleziona gruppi</button><div class="modal-hint">La password deve rispettare la policy del dominio Active Directory.</div>';
+  const root=showModal(title,isCopy?'Crea un account distinto copiando gli attributi selezionati.':isUpdate?'Aggiorna gli attributi dell’account.':'Completa i dati del nuovo account.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-user">Salva</button>');
+  const selectedGroups=new Map((detail?.groups||[]).map(g=>[g.DistinguishedName,g]));
+  const drawSelected=()=>{const target=root.querySelector('#sa-create-selected-groups');target.innerHTML=selectedGroups.size?[...selectedGroups.values()].map(g=>'<div class="group-option"><span><strong>'+escapeHtml(g.Name||g.DistinguishedName)+'</strong><small>'+escapeHtml(g.DistinguishedName)+'</small></span><button type="button" class="text-button" data-remove-create-group="'+escapeHtml(g.DistinguishedName)+'">Rimuovi</button></div>').join(''):'<p class="modal-hint">Nessun gruppo selezionato.</p>';target.querySelectorAll('[data-remove-create-group]').forEach(b=>b.addEventListener('click',()=>{selectedGroups.delete(b.dataset.removeCreateGroup);drawSelected();}));};
+  if(isCreate)root.querySelector('#sa-change-create-ou').addEventListener('click',()=>{modalState={flow:'createUserOU',destinationOU:destination};renderCreateUserOuPicker();});
+  root.querySelector('#sa-choose-create-groups').addEventListener('click',()=>openCreateGroupPicker(selectedGroups,drawSelected));
   root.querySelector('#sa-save-user').addEventListener('click',()=>{
     const val=id=>root.querySelector('#'+id)?.value||'';
-    if(!isUpdate&&(!val('sa-account').trim()||!val('sa-ou').trim()||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
-    const groups=val('sa-groups').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-    const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:val('sa-ou'),department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups,groupName:val('sa-account').trim(),changePasswordAtLogon:true};
-    if(isUpdate) payload.groups=groups;
+    if(!isUpdate&&(!val('sa-account').trim()||!destination||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
+    const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:destination,department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups:[...selectedGroups.keys()],groupName:val('sa-account').trim(),changePasswordAtLogon:true};
     closeModal();send(operation,'',payload);
   });
+  drawSelected();
+}
+function openCreateGroupPicker(selectedGroups,onChanged){
+  const render=term=>{
+    const all=Array.isArray(state.data.groups)?state.data.groups:[];
+    const filtered=all.filter(g=>!term||[g.Name,g.Description,g.DistinguishedName].some(v=>String(v||'').toLocaleLowerCase('it').includes(term.toLocaleLowerCase('it'))));
+    const paths=new Map();
+    const getPath=dn=>String(dn||'').split(/,(?=(?:[^\\]|\\.)*$)/).filter(x=>/^OU=/i.test(x)).map(x=>x.slice(3).replace(/\\,/g,',')).reverse();
+    filtered.forEach(g=>{let node=paths;const p=getPath(g.DistinguishedName);p.forEach(x=>{if(!node.has(x))node.set(x,new Map());node=node.get(x);});});
+    const renderNode=(map,path=[])=>[...map.entries()].map(([name,children])=>'<section class="group-ou-card"><button type="button" class="group-ou-toggle" data-picker-ou="'+escapeHtml([...path,name].join('/'))+'"><span class="group-ou-chevron">›</span><span class="group-ou-name">'+escapeHtml(name)+'</span></button><div class="group-ou-content" hidden>'+renderNode(children,[...path,name])+filtered.filter(g=>getPath(g.DistinguishedName).join('/')===[...path,name].join('/')).map(group=>'<label class="group-option"><input type="checkbox" data-create-group-dn="'+escapeHtml(group.DistinguishedName)+'" '+(selectedGroups.has(group.DistinguishedName)?'checked':'')+'><span><strong>'+escapeHtml(group.Name)+'</strong><small>'+escapeHtml(group.Description||group.DistinguishedName)+'</small></span></label>').join('')+'</div></section>').join('');
+    const unplaced=filtered.filter(g=>getPath(g.DistinguishedName).length===0);
+    return renderNode(paths)+ (unplaced.length?'<section class="group-ou-card"><button type="button" class="group-ou-toggle" data-picker-other><span class="group-ou-chevron">›</span><span class="group-ou-name">Altri gruppi</span><span class="group-ou-count">'+unplaced.length+'</span></button><div class="group-ou-content" hidden>'+unplaced.map(group=>'<label class="group-option"><input type="checkbox" data-create-group-dn="'+escapeHtml(group.DistinguishedName)+'" '+(selectedGroups.has(group.DistinguishedName)?'checked':'')+'><span><strong>'+escapeHtml(group.Name)+'</strong><small>'+escapeHtml(group.Description||group.DistinguishedName)+'</small></span></label>').join('')+'</div></section>':'');
+  };
+  const root=showModal('Seleziona gruppi','Seleziona i gruppi da assegnare al nuovo utente.','<input class="modal-input" id="sa-create-group-search" type="search" placeholder="Cerca gruppo, descrizione o OU…"><div class="group-ou-browser" id="sa-create-group-browser"></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-create-group-confirm">Conferma gruppi</button>');
+  const browser=root.querySelector('#sa-create-group-browser'),search=root.querySelector('#sa-create-group-search');
+  const refresh=()=>{browser.innerHTML=render(search.value.trim());browser.querySelectorAll('[data-picker-ou],[data-picker-other]').forEach(button=>button.addEventListener('click',()=>{const panel=button.nextElementSibling;panel.hidden=!panel.hidden;button.classList.toggle('is-open',!panel.hidden);}));browser.querySelectorAll('[data-create-group-dn]').forEach(input=>input.addEventListener('change',()=>{const group=(state.data.groups||[]).find(g=>g.DistinguishedName===input.dataset.createGroupDn)||{Name:input.dataset.createGroupDn,DistinguishedName:input.dataset.createGroupDn};if(input.checked)selectedGroups.set(group.DistinguishedName,group);else selectedGroups.delete(group.DistinguishedName);}));};
+  if(!Array.isArray(state.data.groups)){showModal('Caricamento gruppi','Lettura dei gruppi dal dominio…','<div class="modal-loading">Caricamento…</div>','<button class="secondary" data-modal-cancel>Annulla</button>');send('groups');return;}
+  refresh();search.addEventListener('input',refresh);
+  root.querySelector('#sa-create-group-confirm').addEventListener('click',()=>{closeModal();onChanged();});
 }
 function openGroupForm(identity=''){
   const row=(state.data.groups||[]).find(x=>x.DistinguishedName===identity)||{};
@@ -449,7 +516,7 @@ function render() {
   content.querySelectorAll('[data-inspect-user]').forEach(button => button.addEventListener('click', () => { state.selectedUser=button.dataset.inspectUser; send('userDetails','',{identity:button.dataset.inspectUser}); }));
   content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUserForm('updateUser',button.dataset.editUser)));
   content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => openUserForm('copyUser',button.dataset.copyUser)));
-  content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', () => openUserForm('createUser','')));
+  content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', startCreateUserFlow));
   content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', openGroupForm));
   content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => send('groupMembers','',{identity:button.dataset.groupMembers})));
   content.querySelectorAll('[data-edit-group]').forEach(button => button.addEventListener('click', () => openGroupForm(button.dataset.editGroup)));
