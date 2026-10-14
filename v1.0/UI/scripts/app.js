@@ -736,7 +736,8 @@ function handleMessage(event) {
   if (result.success && Array.isArray(result.data)) {
     state.data[page] = result.data;
     state.errors[page] = null;
-    if (page === 'ous' && modalState && !modalState.destinationOU) renderOuPicker();
+    if (page === 'ous' && modalState?.flow === 'createUserOU') renderCreateUserOuPicker();
+    else if (page === 'ous' && modalState && !modalState.destinationOU) renderOuPicker();
   } else {
     state.errors[page] = result.error || 'Risposta non valida dal backend.';
     state.data[page] = null;
