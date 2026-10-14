@@ -162,7 +162,7 @@ function Get-ScriptAssystAvailableGroups {
     )
 }
 
-function Get-ScriptAssystUserDetails {function Get-ScriptAssystUserDetails {
+function Get-ScriptAssystUserDetails {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity)
     Import-Module ActiveDirectory -ErrorAction Stop
@@ -244,7 +244,7 @@ function New-ScriptAssystUser {
     if ($Email) { $params.EmailAddress = $Email }
     if ($Description) { $params.Description = $Description }
     New-ADUser @params
-    $created = Get-ADUser -Identity $Identity -Properties DistinguishedName -ErrorAction Stop
+    $created = Get-ADUser -Identity $Identity -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
     $added = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in @($Groups)) {
         if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
@@ -256,8 +256,8 @@ function New-ScriptAssystUser {
             $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
             if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
         }
-        $primaryRid = (Get-ADUser -Identity $created.DistinguishedName -Properties primaryGroupID -ErrorAction Stop).primaryGroupID
-        if ([string]$group.SID.Value.Split('-')[-1] -eq [string]$primaryRid) { continue }
+        $primaryRid = [string]$created.primaryGroupID
+        if ([string]$group.SID.Value.Split('-')[-1] -eq $primaryRid) { continue }
         $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
             Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
         if ($alreadyMember) { continue }
@@ -267,7 +267,7 @@ function New-ScriptAssystUser {
     [pscustomobject]@{ message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."; user = $created; groups = @($added) }
 }
 
-function Update-ScriptAssystUserGroups {function Update-ScriptAssystUserGroups {
+function Update-ScriptAssystUserGroups {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity,[string[]]$Groups = @())
     Import-Module ActiveDirectory -ErrorAction Stop
@@ -338,7 +338,7 @@ function Invoke-ScriptAssystRequest {
             'users' { Get-ScriptAssystUsers -Query $Query }
             'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
             'availableGroups' { Get-ScriptAssystAvailableGroups }
-            'createUser' { New-ScriptAssystUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }            'userDetails' { Get-ScriptAssystUserDetails -Identity $Identity }
+            'createUser' { New-ScriptAssystUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'updateUserGroups' { Update-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
             'groups' { Get-ScriptAssystGroups -Query $Query }
             'ous' { Get-ScriptAssystOUs -Query $Query }
