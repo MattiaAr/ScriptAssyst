@@ -264,6 +264,13 @@ function tablePage(page) {
   const error = state.errors[page];
   const loading = state.loading[page];
   let rows = Array.isArray(data) ? [...data] : [];
+  // The users dataset is loaded in bulk; filter it locally to avoid an AD round-trip per search.
+  const localQuery = page === 'users' ? String(query || '').trim().toLocaleLowerCase('it') : '';
+  if (localQuery) {
+    rows = rows.filter(row => Object.values(row).some(value =>
+      String(value ?? '').toLocaleLowerCase('it').includes(localQuery)
+    ));
+  }
   const sort = state.sort[page] || { key: config.columns[0][0], direction: 'asc' };
   rows.sort((a, b) => {
     const av = a[sort.key]; const bv = b[sort.key];
@@ -647,9 +654,9 @@ function render() {
     state.queries[page] = event.target.value;
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
-      if (page === 'groups' || page === 'ous') render();
+      if (page === 'groups' || page === 'ous' || (page === 'users' && Array.isArray(state.data.users))) render();
       else requestPage(page, state.queries[page]);
-    }, 250);
+    }, 120);
   });
 }
 function handleMessage(event) {
