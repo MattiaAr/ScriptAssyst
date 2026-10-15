@@ -249,26 +249,8 @@ function Get-ScriptAssystUserDetails {
             [pscustomobject]@{ Name=$group.Name; DistinguishedName=$group.DistinguishedName }
         }
     )
-    $cacheValid = $null -ne $script:ScriptAssystAvailableGroupsCache -and ((Get-Date) - $script:ScriptAssystAvailableGroupsCacheAt).TotalSeconds -lt 60
-    if ($cacheValid) {
-        $availableGroups = @($script:ScriptAssystAvailableGroupsCache)
-    } else {
-        $availableGroups = @(
-            Get-ADGroup -Filter * -Properties Description,DistinguishedName,SID,GroupCategory,GroupScope -ErrorAction Stop |
-            Where-Object {
-                $sid = [string]$_.SID.Value
-                $isBuiltinContainer = $_.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,'
-                $isDefaultDomainObject = $sid -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
-                -not ($isBuiltinContainer -or $isDefaultDomainObject)
-            } |
-            Sort-Object Name |
-            Select-Object Name,SamAccountName,Description,DistinguishedName,GroupCategory,GroupScope,
-                @{Name='ScriptAssystGroupType';Expression={'Personalizzato'}}
-        )
-        $script:ScriptAssystAvailableGroupsCache = @($availableGroups)
-        $script:ScriptAssystAvailableGroupsCacheAt = Get-Date
-    }
-    [pscustomobject]@{ user=$details; groups=$groups; availableGroups=$availableGroups }
+    # Keep user details fast: load the selectable group catalogue separately after the modal opens.
+    [pscustomobject]@{ user=$details; groups=$groups; availableGroups=@() }
 }
 
 function New-ScriptAssystUser {
