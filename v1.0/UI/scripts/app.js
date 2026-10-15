@@ -109,6 +109,7 @@ const pageConfig = {
 };
 
 const treeExpanded = { groups: new Set(), ous: new Set() };
+let groupMemberSelections = new Set();
 function dnParent(dn) {
   const parts = String(dn || '').split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
   return parts.length > 1 ? parts.slice(1).join(',') : '';
@@ -702,12 +703,12 @@ function handleMessage(event) {
      return;
    }
   if (result.operation === 'groupMembers' && result.success && result.data) {
-    const members=result.data.members||[], selectedToAdd=new Map();
+    const members=result.data.members||[]; groupMemberSelections=new Set();
     const body='<h3 class="modal-section-title">Membri attuali</h3><div class="group-members-list">'+(members.map(m=>'<label><input type="checkbox" checked data-member-dn="'+escapeHtml(m.DistinguishedName)+'"> <span>'+escapeHtml(m.Name)+' <small>'+escapeHtml(m.ObjectClass)+'</small><small class="dn-caption">'+escapeHtml(m.DistinguishedName)+'</small></span></label>').join('')||'<p class="modal-hint">Il gruppo non contiene membri.</p>')+'</div><h3 class="modal-section-title">Aggiungi membri</h3><p class="modal-hint">Cerca per nome o account e seleziona un risultato, oppure inserisci direttamente un DN completo. Puoi aggiungere utenti e gruppi.</p><input class="modal-input" id="sa-member-search" type="search" placeholder="Cerca nome o account (almeno 2 caratteri)…" autocomplete="off"><div id="sa-member-search-results" class="member-search-results"></div><label class="modal-label" for="sa-add-members">DN da aggiungere manualmente</label><textarea class="modal-input" id="sa-add-members" placeholder="CN=Mario Rossi,OU=Utenti,DC=homelab,DC=local (uno per riga)"></textarea><div class="modal-hint">I risultati selezionati e i DN manuali vengono aggiunti al gruppo al salvataggio.</div>';
     const root=showModal('Membri del gruppo',result.data.name||result.data.group||'',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-group-members">Salva membri</button>');
     const search=root.querySelector('#sa-member-search'),results=root.querySelector('#sa-member-search-results');let searchTimer=null;
     search.addEventListener('input',()=>{clearTimeout(searchTimer);const q=search.value.trim();if(q.length<2){results.innerHTML='<p class="modal-hint">Digita almeno 2 caratteri per cercare.</p>';return;}results.innerHTML='<p class="modal-hint">Ricerca in Active Directory…</p>';searchTimer=setTimeout(()=>send('searchDirectoryMembers',q,{operation:'searchDirectoryMembers'}),300);});
-    root.querySelector('#sa-save-group-members').addEventListener('click',()=>{const keep=[...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn),manual=root.querySelector('#sa-add-members').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),members=[...new Set(keep.concat([...selectedToAdd.keys()],manual))];closeModal();send('updateGroupMembers','',{operation:'updateGroupMembers',identity:result.data.group,members});});
+    root.querySelector('#sa-save-group-members').addEventListener('click',()=>{const keep=[...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn),manual=root.querySelector('#sa-add-members').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),members=[...new Set(keep.concat([...groupMemberSelections],manual))];closeModal();send('updateGroupMembers','',{operation:'updateGroupMembers',identity:result.data.group,members});});
     root.dataset.groupDn=result.data.group;
     return;
   }
@@ -715,9 +716,9 @@ function handleMessage(event) {
     const root=document.querySelector('.modal-card');if(!root||!root.dataset.groupDn)return;
     const results=root.querySelector('#sa-member-search-results');if(!results)return;
     if(!result.success||!Array.isArray(result.data)){results.innerHTML='<div class="modal-error">'+escapeHtml(result.error||'Ricerca non riuscita')+'</div>';return;}
-    const chosen=new Set([...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn));
+    const chosen=groupMemberSelections;
     results.innerHTML=result.data.map(item=>'<button type="button" class="member-search-result '+(chosen.has(item.DistinguishedName)?'selected':'')+'" data-search-member-dn="'+escapeHtml(item.DistinguishedName)+'"><span><strong>'+escapeHtml(item.Name)+'</strong><small>'+escapeHtml(item.SamAccountName||item.ObjectClass)+'</small><small class="dn-caption">'+escapeHtml(item.DistinguishedName)+'</small></span><span>'+(chosen.has(item.DistinguishedName)?'Aggiunto':'Aggiungi')+'</span></button>').join('')||'<p class="modal-hint">Nessun utente o gruppo trovato.</p>';
-    results.querySelectorAll('[data-search-member-dn]').forEach(button=>button.addEventListener('click',()=>{const dn=button.dataset.searchMemberDn;if(selectedToAdd.has(dn)){selectedToAdd.delete(dn);}else{selectedToAdd.set(dn,true);}button.classList.toggle('selected',selectedToAdd.has(dn));button.lastElementChild.textContent=selectedToAdd.has(dn)?'Aggiunto':'Aggiungi';}));
+    results.querySelectorAll('[data-search-member-dn]').forEach(button=>button.addEventListener('click',()=>{const dn=button.dataset.searchMemberDn;if(groupMemberSelections.has(dn)){groupMemberSelections.delete(dn);}else{groupMemberSelections.add(dn);}button.classList.toggle('selected',groupMemberSelections.has(dn));button.lastElementChild.textContent=groupMemberSelections.has(dn)?'Aggiunto':'Aggiungi';}));
     return;
   }
   if (result.operation === 'ouContents' && result.success && result.data) {
