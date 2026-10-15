@@ -157,9 +157,9 @@ function Search-ScriptAssystDirectoryMembers {
 
     # Escape characters with special meaning in LDAP filters before inserting user input.
     $ldapTerm = $term.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([string][char]0, '\00')
-    $ldapFilter = "(&(|(objectCategory=person)(objectClass=group))(|(name=*$ldapTerm*)(sAMAccountName=*$ldapTerm*)))"
+    $ldapFilter = "(&(objectCategory=person)(objectClass=user)(|(name=*$ldapTerm*)(sAMAccountName=*$ldapTerm*)))"
 
-    # One directory query is faster than separate Get-ADUser and Get-ADGroup calls.
+    # This picker adds users to a group, so return user objects only.
     $results = @(
         Get-ADObject -LDAPFilter $ldapFilter -Properties SamAccountName,DistinguishedName,ObjectClass -ResultSetSize 30 -ErrorAction Stop |
         Select-Object Name,SamAccountName,DistinguishedName,ObjectClass
