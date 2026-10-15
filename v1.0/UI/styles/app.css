@@ -295,3 +295,26 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
 .group-delete-warning{display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding:11px 12px;border:1px solid #8c762e;border-radius:8px;background:#332d17;color:#fff0a6;line-height:1.5;font-size:12px}
 .group-delete-warning-icon{flex:0 0 auto;color:#ffd43b;font-size:25px;line-height:1;font-weight:900;text-shadow:0 0 8px #ffd43b55}
 .group-delete-warning strong{color:#fff0a6;font-size:12px}
+
+/* Guided mode: clear steps, large targets and contextual navigation */
+.guided-card{max-width:900px;margin:0 auto;padding:clamp(20px,3vw,32px)}
+.guided-card>p{max-width:720px;font-size:12px;line-height:1.7}
+.guided-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:20px 0 24px}
+.guided-steps>div{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #293750;border-radius:10px;background:#111a2b}
+.guided-steps b{flex:none;width:25px;height:25px;display:grid;place-items:center;border-radius:8px;background:#213c4a;color:#8ce5d7;font-size:11px}
+.guided-steps strong,.guided-steps small{display:block}
+.guided-steps strong{font-size:11px;color:#e8edf7}
+.guided-steps small{margin-top:4px;color:#8493ad;font-size:10px;line-height:1.45}
+.guided-card .workflow-list{gap:10px;margin:0}
+.guided-card .workflow{min-height:70px;padding:15px;gap:14px}
+.guided-card .workflow>span:nth-child(2){flex:1;min-width:0}
+.guided-card .workflow strong{font-size:12px}
+.guided-card .workflow small{font-size:10px;line-height:1.5;white-space:normal}
+.workflow-arrow{color:#7ce0d0;font-size:24px;line-height:1}
+.guided-note{display:grid;gap:5px;margin-top:20px;padding:13px 15px;border:1px solid #59472b;border-radius:9px;background:#2a2419;color:#d9c49b;font-size:11px;line-height:1.6}
+.guided-note strong{color:#f0d6a0}
+.guided-footer{display:flex;justify-content:space-between;gap:12px;max-width:900px;margin:12px auto;color:#71809a;font-size:10px}
+.guided-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
+.guided-current{color:#8b9bb5;font-size:10px}
+.guided-results{max-width:1200px;margin:18px auto 0}
+@media(max-width:800px){.guided-steps{grid-template-columns:1fr}.guided-footer{flex-direction:column}.guided-card .workflow{align-items:flex-start}}
