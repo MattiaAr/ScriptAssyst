@@ -313,7 +313,17 @@ function Remove-ScriptAssystUser {
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
     $user = Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName -ErrorAction Stop
-    $rid = if ([string]$user.SID.Value -match '-(\d+)
+    $sidParts = ([string]$user.SID.Value).Split('-')
+    $rid = -1
+    if ($sidParts.Length -gt 0) { [void][int]::TryParse($sidParts[-1], [ref]$rid) }
+    if ($rid -in @(500,501,502)) { throw 'Non è consentito eliminare gli account amministratore, guest o krbtgt predefiniti.' }
+    $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    if ($current -and $current.Split('\')[-1] -ieq $user.SamAccountName) { throw 'Non è consentito eliminare l’account attualmente in uso.' }
+    Remove-ADUser -Identity $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{ message="Utente '$($user.SamAccountName)' eliminato da Active Directory."; identity=$user.DistinguishedName }
+}
+
+function Get-ScriptAssystUserDetails {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity)
     Import-Module ActiveDirectory -ErrorAction Stop
@@ -357,7 +367,8 @@ function New-ScriptAssystUser {
         $domain = Get-ADDomain -ErrorAction Stop
         $UserPrincipalName = "$Identity@$($domain.DNSRoot)"
     }
-    if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+
+    if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+$') { throw 'User Principal Name non valido. Usa il formato nome@dominio.' }
+    $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
     $escapedIdentity = $Identity.Replace("'", "''")
     if (Get-ADUser -Filter "SamAccountName -eq '$escapedIdentity'" -ErrorAction Stop) { throw "Esiste già un account con nome '$Identity'." }
     $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
