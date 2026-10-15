@@ -318,7 +318,7 @@ function Remove-ScriptAssystUser {
     if ($sidParts.Length -gt 0) { [void][int]::TryParse($sidParts[-1], [ref]$rid) }
     if ($rid -in @(500,501,502)) { throw 'Non è consentito eliminare gli account amministratore, guest o krbtgt predefiniti.' }
     $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    if ($current -and $current.Split('\')[-1] -ieq $user.SamAccountName) { throw 'Non è consentito eliminare l’account attualmente in uso.' }
+    if ($current -and $current.Substring($current.LastIndexOf('\') + 1) -ieq $user.SamAccountName) { throw 'Non è consentito eliminare l’account attualmente in uso.' }
     Remove-ADUser -Identity $user.DistinguishedName -Confirm:$false -ErrorAction Stop
     [pscustomobject]@{ message="Utente '$($user.SamAccountName)' eliminato da Active Directory."; identity=$user.DistinguishedName }
 }
@@ -508,7 +508,7 @@ function Invoke-ScriptAssystRequest {
             'gpos' { Get-ScriptAssystGpos -Query $Query }
             'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
             'disableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
-            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
             'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'deleteUser' { Remove-ScriptAssystUser -Identity $Identity }
