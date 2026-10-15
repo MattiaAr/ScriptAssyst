@@ -553,6 +553,7 @@ function openUserForm(operation,identity,detail=null){
     const val=id=>root.querySelector('#'+id)?.value||'';
     if(!isUpdate&&(!val('sa-account').trim()||!destination||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
     const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:destination,department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups:[...new Set([...selectedGroups.keys(),...val('sa-manual-groups').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)])],groupName:val('sa-account').trim(),changePasswordAtLogon:true};
+    root.querySelector('#sa-form-error')?.remove();
     root.querySelectorAll('input,textarea,button').forEach(el=>{if(!el.hasAttribute('data-modal-cancel'))el.disabled=true;});
      root.dataset.pendingOperation=operation;
      root.querySelector('.modal-actions').insertAdjacentHTML('afterbegin','<span class="modal-hint" id="sa-save-progress">Salvataggio in corso…</span>');
