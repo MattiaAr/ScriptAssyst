@@ -212,14 +212,13 @@ function Search-ScriptAssystDirectoryMembers {
     $term = ([string]$Query).Trim()
     if ([string]::IsNullOrWhiteSpace($term) -or $term.Length -lt 2) { return @() }
 
-    # Escape characters with special meaning in LDAP filters before inserting user input.
-    $ldapTerm = $term.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([string][char]0, '\00')
-    $ldapFilter = "(&(objectCategory=person)(objectClass=user)(|(name=*$ldapTerm*)(sAMAccountName=*$ldapTerm*)))"
-
-    # This picker adds users to a group, so return user objects only.
+    # Use the AD PowerShell provider's filter parser instead of constructing an LDAP filter.
+    # Escape single quotes so names/account fragments cannot break the filter expression.
+    $escaped = $term.Replace("'", "''")
+    $filter = "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*'"
     $results = @(
-        Get-ADObject -LDAPFilter $ldapFilter -Properties SamAccountName,DistinguishedName,ObjectClass -ResultSetSize 30 -ErrorAction Stop |
-        Select-Object Name,SamAccountName,DistinguishedName,ObjectClass
+        Get-ADUser -Filter $filter -Properties SamAccountName,DistinguishedName -ResultSetSize 30 -ErrorAction Stop |
+        Select-Object Name,SamAccountName,DistinguishedName,@{Name='ObjectClass';Expression={'user'}}
     )
     @($results | Sort-Object Name | Select-Object -First 30)
 }
