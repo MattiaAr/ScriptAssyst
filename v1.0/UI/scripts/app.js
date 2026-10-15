@@ -185,7 +185,7 @@ function renderTreeNode(item, type, depth, childHtml, hasChildren, open) {
     '<span class="directory-icon">' + icon + '</span><div class="directory-label"><strong>' + escapeHtml(label) + '</strong>' +
     (type === 'ous' ? '<small>' + escapeHtml(item.DistinguishedName || '') + '</small>' : '<small>' + escapeHtml(item.GroupCategory || '') + ' · ' + escapeHtml(item.GroupScope || '') + ' · ' + escapeHtml(item.MemberCount ?? 0) + ' membri</small>') +
     '</div>' + (type === 'ous' ? '<span class="directory-meta ' + (item.ProtectedFromAccidentalDeletion ? 'protected' : '') + '">' + (item.ProtectedFromAccidentalDeletion ? 'Protetta' : 'Non protetta') + '</span>' : '<span class="directory-tag ' + (item.ScriptAssystGroupType === 'Predefinito' ? 'default-tag' : 'custom-tag') + '">' + escapeHtml(item.ScriptAssystGroupType || 'Personalizzato') + '</span>') +
-    '</div>' + (hasChildren && open ? '<div class="directory-children">' + childHtml + '</div>' : '') + (type === 'ous' ? '<button class="text-button ou-open" data-ou-open="' + escapeHtml(item.DistinguishedName) + '">Apri contenuto</button>' : '') + '</div>';
+    '</div>' + (hasChildren && open ? '<div class="directory-children">' + childHtml + '</div>' : '') + (type === 'ous' ? '<div class="ou-row-actions"><button class="text-button ou-open" data-ou-open="' + escapeHtml(item.DistinguishedName) + '">Apri contenuto</button><button class="text-button" data-edit-ou="' + escapeHtml(item.DistinguishedName) + '">Modifica</button><button class="text-button" data-delete-ou="' + escapeHtml(item.DistinguishedName) + '">Elimina</button></div>' : '') + '</div>';
 }
 function filterTreeItems(items, query, getChildren) {
   if (!query) return items;
@@ -252,7 +252,7 @@ function treePage(page) {
   else if (error) body = '<div class="empty">Errore: ' + escapeHtml(error) + '</div>';
   else if (page === 'ous') body = buildOuTree(rows, query);
   else body = buildGroupTree(rows, query);
-  const controls = '<div class="tree-controls"><span class="panel-sub">' + rows.length + (page === 'ous' ? ' unità organizzative' : ' gruppi') + ' · dati Active Directory</span><div>' + (page === 'groups' ? '<button class="primary" data-create-group>Nuovo gruppo</button> ' : '') + '<button class="tree-action" data-tree-expand="' + page + '">Espandi tutto</button><button class="tree-action" data-tree-collapse="' + page + '">Comprimi tutto</button></div></div>';
+  const controls = '<div class="tree-controls"><span class="panel-sub">' + rows.length + (page === 'ous' ? ' unità organizzative' : ' gruppi') + ' · dati Active Directory</span><div>' + (page === 'groups' ? '<button class="primary" data-create-group>Nuovo gruppo</button> ' : '<button class="primary" data-create-ou>Nuova OU</button> ') + '<button class="tree-action" data-tree-expand="' + page + '">Espandi tutto</button><button class="tree-action" data-tree-collapse="' + page + '">Comprimi tutto</button></div></div>';
   return '<div class="page-toolbar"><div class="panel-sub">' + escapeHtml(title) + ' · struttura gerarchica</div><input class="search" id="page-search" value="' + escapeHtml(query) + '" placeholder="' + escapeHtml(page === 'ous' ? 'Cerca una OU…' : 'Cerca un gruppo…') + '" aria-label="Cerca"></div>' + controls + '<div class="directory-tree">' + body + '</div>';
 }
 
@@ -591,6 +591,28 @@ function confirmDeleteGroup(identity){
  const root=showModal('Elimina gruppo','Operazione irreversibile su Active Directory.','<div class="choice-panel"><strong>'+escapeHtml(row?.Name||identity)+'</strong><p>Il gruppo verrà eliminato dalla directory. Verifica che non sia utilizzato da applicazioni o autorizzazioni.</p></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-delete-group">Elimina gruppo</button>');
  root.querySelector('#sa-delete-group').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity});});
 }
+
+function openOUForm(operation, identity='') {
+  const existing=(state.data.ous||[]).find(o=>o.DistinguishedName===identity)||null;
+  const title=operation==='createOU'?'Crea unità organizzativa':'Modifica unità organizzativa';
+  const body='<label class="modal-label" for="sa-ou-name">Nome OU</label><input class="modal-input" id="sa-ou-name" maxlength="64" required value="'+escapeHtml(existing?.Name||'')+'" placeholder="Es. Utenti"><label class="modal-label" for="sa-ou-description">Descrizione</label><textarea class="modal-input" id="sa-ou-description" rows="3" placeholder="Descrizione facoltativa">'+escapeHtml(existing?.Description||'')+'</textarea>'+(operation==='createOU'?'<label class="modal-label" for="sa-ou-parent">OU padre</label><select class="modal-input" id="sa-ou-parent"><option value="">Radice del dominio</option>'+[...(state.data.ous||[])].sort((a,b)=>a.DistinguishedName.localeCompare(b.DistinguishedName,'it')).map(o=>'<option value="'+escapeHtml(o.DistinguishedName)+'">'+escapeHtml(o.DistinguishedName)+'</option>').join('')+'</select><p class="modal-hint">Scegli una OU padre oppure crea la nuova OU nella radice del dominio.</p>':'<p class="modal-hint">'+escapeHtml(identity)+'</p>');
+  const root=showModal(title,existing?.DistinguishedName||'Nuova OU',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-ou">Salva</button>');
+  root.querySelector('#sa-save-ou').addEventListener('click',()=>{
+    const name=root.querySelector('#sa-ou-name').value.trim();
+    if(!name){root.querySelector('#sa-ou-name').focus();return;}
+    const description=root.querySelector('#sa-ou-description').value.trim();
+    const path=operation==='createOU'?root.querySelector('#sa-ou-parent').value:'';
+    closeModal();
+    send(operation,'',{identity,groupName:name,description,path});
+  });
+}
+function confirmDeleteOU(identity) {
+  const ou=(state.data.ous||[]).find(o=>o.DistinguishedName===identity);
+  if(!ou)return;
+  const root=showModal('Elimina unità organizzativa',ou.Name,'<div class="modal-error">Stai per eliminare la OU <strong>'+escapeHtml(ou.Name)+'</strong>.<p>L’eliminazione è consentita solo se la OU è vuota e non è protetta. L’operazione non è reversibile.</p></div><small>'+escapeHtml(identity)+'</small>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-confirm-delete-ou">Elimina OU</button>');
+  root.querySelector('#sa-confirm-delete-ou').addEventListener('click',()=>{closeModal();send('deleteOU','',{identity});});
+}
+
 function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
 
 function guided() {
@@ -625,6 +647,9 @@ function render() {
   content.querySelectorAll('[data-edit-group]').forEach(button => button.addEventListener('click', () => openGroupForm(button.dataset.editGroup)));
   content.querySelectorAll('[data-delete-group]').forEach(button => button.addEventListener('click', () => confirmDeleteGroup(button.dataset.deleteGroup)));
   content.querySelectorAll('[data-ou-open]').forEach(button => button.addEventListener('click', () => send('ouContents','',{identity:button.dataset.ouOpen})));
+  content.querySelectorAll('[data-create-ou]').forEach(button => button.addEventListener('click', () => openOUForm('createOU')));
+  content.querySelectorAll('[data-edit-ou]').forEach(button => button.addEventListener('click', () => openOUForm('updateOU',button.dataset.editOu)));
+  content.querySelectorAll('[data-delete-ou]').forEach(button => button.addEventListener('click', () => confirmDeleteOU(button.dataset.deleteOu)));
   content.querySelectorAll('[data-sort-key]').forEach(button => button.addEventListener('click', () => {
     const page = state.page;
     const current = state.sort[page] || { key: button.dataset.sortKey, direction: 'asc' };
@@ -818,11 +843,13 @@ function handleMessage(event) {
     document.querySelectorAll('[data-open-child-ou]').forEach(button=>button.addEventListener('click',()=>{closeModal();send('ouContents','',{identity:button.dataset.openChildOu});}));
     return;
   }
-  if (['createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
+  if (['createOU','updateOU','deleteOU','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
     if (result.success) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
       const userMutation = ['createUser','updateUser','copyUser'].includes(result.operation);
       const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
+      const ouMutation = ['createOU','updateOU','deleteOU'].includes(result.operation);
+      if (ouMutation) { state.data.ous = null; if (state.page === 'ous') requestPage('ous', state.queries.ous || ''); }
       // Keep the current DOM and cached rows visible while refreshing the affected dataset.
       // The fresh response will replace the old data once it arrives.
       if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
