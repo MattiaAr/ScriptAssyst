@@ -133,16 +133,16 @@ function renderMemberSearchResults(results, items) {
 
 function searchCachedDirectoryMembers(query) {
   const term = String(query || '').trim().toLocaleLowerCase('it');
-  const users = (Array.isArray(state.data.users) ? state.data.users : []).map(item => ({...item, ObjectClass:'user'}));
-  const groups = (Array.isArray(state.data.groups) ? state.data.groups : []).map(item => ({...item, ObjectClass:'group'}));
+  const users = Array.isArray(state.data.users) ? state.data.users : [];
   const seen = new Set();
-  return users.concat(groups).filter(item => {
+  return users.filter(item => {
     const dn = String(item.DistinguishedName || '');
-    if (!dn || seen.has(dn.toLocaleLowerCase('it'))) return false;
-    seen.add(dn.toLocaleLowerCase('it'));
-    return [item.Name, item.SamAccountName, item.DistinguishedName, item.Description]
+    const key = dn.toLocaleLowerCase('it');
+    if (!dn || seen.has(key)) return false;
+    seen.add(key);
+    return [item.Name, item.SamAccountName, item.DistinguishedName, item.Department, item.Title, item.Mail]
       .some(value => String(value || '').toLocaleLowerCase('it').includes(term));
-  }).slice(0, 30);
+  }).map(item => ({...item, ObjectClass:'user'})).slice(0, 30);
 }
 
 function openGroupMembers(identity) {
