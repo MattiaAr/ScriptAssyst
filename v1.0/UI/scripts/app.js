@@ -249,9 +249,11 @@ function treePage(page) {
 function requestPage(page, query = '') {
   const config = pageConfig[page];
   if (!config) return;
+  const needsInitialRender = !Array.isArray(state.data[page]);
   state.loading[page] = true;
   state.errors[page] = null;
-  render();
+  // Keep the existing page visible during refresh; only render a loading state on first load.
+  if (needsInitialRender) render();
   send(config.operation, query);
 }
 function tablePage(page) {
@@ -797,8 +799,20 @@ function handleMessage(event) {
     return;
   }
   if (['createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
-    if(result.success){showResultModal('Operazione completata',result.data?.message||'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');state.data.users=null;state.data.groups=null;state.data.ous=null;if(state.page==='users')requestPage('users',state.queries.users||'');if(state.page==='groups')requestPage('groups',state.queries.groups||'');send('dashboard');}
-    else showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
+    if (result.success) {
+      showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+      const userMutation = ['createUser','updateUser','copyUser'].includes(result.operation);
+      const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
+      if (userMutation) state.data.users = null;
+      if (groupMutation) state.data.groups = null;
+      // Refresh only the affected dataset, and only when its page is active.
+      if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
+      else if (state.page === 'groups' && groupMutation) requestPage('groups', state.queries.groups || '');
+      // Dashboard metrics are only visible on the overview page.
+      if (state.page === 'overview') send('dashboard');
+    } else {
+      showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
+    }
     return;
   }
   if (result.operation === 'availableGroups') {
