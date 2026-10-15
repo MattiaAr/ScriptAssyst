@@ -595,13 +595,34 @@ function confirmDeleteGroup(identity){
 function openOUForm(operation, identity='') {
   const existing=(state.data.ous||[]).find(o=>o.DistinguishedName===identity)||null;
   const title=operation==='createOU'?'Crea unità organizzativa':'Modifica unità organizzativa';
-  const body='<label class="modal-label" for="sa-ou-name">Nome OU</label><input class="modal-input" id="sa-ou-name" maxlength="64" required value="'+escapeHtml(existing?.Name||'')+'" placeholder="Es. Utenti"><label class="modal-label" for="sa-ou-description">Descrizione</label><textarea class="modal-input" id="sa-ou-description" rows="3" placeholder="Descrizione facoltativa">'+escapeHtml(existing?.Description||'')+'</textarea>'+(operation==='createOU'?'<label class="modal-label" for="sa-ou-parent">OU padre</label><select class="modal-input" id="sa-ou-parent"><option value="">Radice del dominio</option>'+[...(state.data.ous||[])].sort((a,b)=>a.DistinguishedName.localeCompare(b.DistinguishedName,'it')).map(o=>'<option value="'+escapeHtml(o.DistinguishedName)+'">'+escapeHtml(o.DistinguishedName)+'</option>').join('')+'</select><p class="modal-hint">Scegli una OU padre oppure crea la nuova OU nella radice del dominio.</p>':'<p class="modal-hint">'+escapeHtml(identity)+'</p>');
+  const body='<label class="modal-label" for="sa-ou-name">Nome OU</label><input class="modal-input" id="sa-ou-name" maxlength="64" required value="'+escapeHtml(existing?.Name||'')+'" placeholder="Es. Utenti"><label class="modal-label" for="sa-ou-description">Descrizione</label><textarea class="modal-input" id="sa-ou-description" rows="3" placeholder="Descrizione facoltativa">'+escapeHtml(existing?.Description||'')+'</textarea>'+(operation==='createOU'?'<label class="modal-label">OU padre</label><p class="modal-hint">Seleziona la radice del dominio oppure una OU esistente.</p><div class="create-ou-tree" id="sa-ou-parent-tree"></div>':'<p class="modal-hint">'+escapeHtml(identity)+'</p>');
   const root=showModal(title,existing?.DistinguishedName||'Nuova OU',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-ou">Salva</button>');
+  let selectedParent='';
+  if(operation==='createOU'){
+    const browser=root.querySelector('#sa-ou-parent-tree');
+    const ous=Array.isArray(state.data.ous)?state.data.ous:[];
+    const byDn=new Map(ous.map(o=>[String(o.DistinguishedName||'').toLowerCase(),o]));
+    const children=new Map(),roots=[];
+    ous.forEach(ou=>{
+      const parent=String(ou.DistinguishedName||'').split(/,(?=(?:[^\\]|\\.)*$)/).slice(1).join(',').toLowerCase();
+      if(byDn.has(parent)){if(!children.has(parent))children.set(parent,[]);children.get(parent).push(ou);}else roots.push(ou);
+    });
+    const rootKey='__domain_root__';
+    const node=(ou,depth=0)=>{
+      const dn=String(ou.DistinguishedName||''),kids=children.get(dn.toLowerCase())||[];
+      return '<div class="create-ou-node" style="--ou-depth:'+depth+'"><button type="button" class="create-ou-choice" data-ou-parent-choice="'+escapeHtml(dn)+'"><span class="ou-tree-icon">▤</span><span><strong>'+escapeHtml(ou.Name)+'</strong><small>'+escapeHtml(dn)+'</small></span><span class="ou-tree-check">Seleziona</span></button>'+(kids.length?'<div class="create-ou-children">'+kids.sort((a,b)=>a.Name.localeCompare(b.Name,'it')).map(k=>node(k,depth+1)).join('')+'</div>':'')+'</div>';
+    };
+    browser.innerHTML='<div class="create-ou-node"><button type="button" class="create-ou-choice selected" data-ou-parent-choice="" aria-pressed="true"><span class="ou-tree-icon">⌂</span><span><strong>Radice del dominio</strong><small>OU creata direttamente nel dominio</small></span><span class="ou-tree-check">Selezionata</span></button></div>'+roots.sort((a,b)=>a.Name.localeCompare(b.Name,'it')).map(ou=>node(ou)).join('');
+    browser.querySelectorAll('[data-ou-parent-choice]').forEach(button=>button.addEventListener('click',()=>{
+      selectedParent=button.dataset.ouParentChoice||'';
+      browser.querySelectorAll('[data-ou-parent-choice]').forEach(b=>{b.classList.toggle('selected',b===button);b.querySelector('.ou-tree-check').textContent=b===button?'Selezionata':'Seleziona';b.setAttribute('aria-pressed',String(b===button));});
+    }));
+  }
   root.querySelector('#sa-save-ou').addEventListener('click',()=>{
     const name=root.querySelector('#sa-ou-name').value.trim();
     if(!name){root.querySelector('#sa-ou-name').focus();return;}
     const description=root.querySelector('#sa-ou-description').value.trim();
-    const path=operation==='createOU'?root.querySelector('#sa-ou-parent').value:'';
+    const path=operation==='createOU'?selectedParent:'';
     closeModal();
     send(operation,'',{identity,groupName:name,description,path});
   });
