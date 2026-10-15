@@ -711,7 +711,8 @@ function handleMessage(event) {
     return;
   }
   if (result.operation === 'userDetails' && result.success && result.data) {
-     const u=result.data.user||{}, groups=result.data.groups||[], available=result.data.availableGroups||[];
+     const u=result.data.user||{}, groups=result.data.groups||[];
+     let available=Array.isArray(result.data.availableGroups)?result.data.availableGroups:[];
      const formatAdDate=value=>{
        if(value===null||value===undefined||value==='') return '—';
        if(typeof value==='string'){const match=value.match(/^\/Date\((\d+)(?:[+-]\d+)?\)\/$/);if(match)value=Number(match[1]);}
@@ -760,7 +761,7 @@ function handleMessage(event) {
        wireTree();
      };
      refreshTree();search.addEventListener('input',refreshTree);
-     browser.addEventListener('sa-available-groups-loaded',refreshTree);
+     browser.addEventListener('sa-available-groups-loaded',()=>{available=Array.isArray(state.availableGroups)?state.availableGroups:[];refreshTree();});
      if(!Array.isArray(state.availableGroups)) send('availableGroups');
      root.querySelector('#sa-save-members').addEventListener('click',()=>{
        const keep=[...root.querySelectorAll('[data-current-member-dn]:checked')].map(x=>x.dataset.currentMemberDn);
