@@ -707,11 +707,23 @@ function render() {
   const search = document.querySelector('#page-search');
   if (search) search.addEventListener('input', event => {
     const page = state.page;
-    state.queries[page] = event.target.value;
+    const input = event.target;
+    state.queries[page] = input.value;
+    const caretStart = input.selectionStart;
+    const caretEnd = input.selectionEnd;
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
-      if (page === 'groups' || page === 'ous' || (page === 'users' && Array.isArray(state.data.users))) render();
-      else requestPage(page, state.queries[page]);
+      if (page === 'groups' || page === 'ous' || (page === 'users' && Array.isArray(state.data.users))) {
+        render();
+        // render() rebuilds the page DOM; restore focus and caret so local search remains typeable.
+        const refreshedSearch = document.querySelector('#page-search');
+        if (refreshedSearch && state.page === page) {
+          refreshedSearch.focus({ preventScroll: true });
+          try { refreshedSearch.setSelectionRange(caretStart, caretEnd); } catch (_) {}
+        }
+      } else {
+        requestPage(page, state.queries[page]);
+      }
     }, 120);
   });
 }
