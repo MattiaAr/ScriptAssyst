@@ -946,7 +946,11 @@ function handleMessage(event) {
     } else if (result.success) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
     } else {
-      showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
+      let errorMessage = result.error || 'Errore non specificato';
+      if (result.operation === 'deleteOU' && /value does not fall within the expected range/i.test(errorMessage)) {
+        errorMessage = 'Active Directory non ha consentito l’eliminazione della OU. Se la OU è protetta dall’eliminazione accidentale, disattiva prima la protezione nelle proprietà della OU e riprova. Se la protezione è già disattivata, verifica autorizzazioni e contenuto della OU.';
+      }
+      showResultModal('Operazione non completata', result.operation === 'deleteOU' ? 'Impossibile eliminare l’unità organizzativa.' : 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">'+escapeHtml(errorMessage)+'</div>');
     }
     if (ouMutation) { state.data.ous = null; if (state.page === 'ous') requestPage('ous', state.queries.ous || ''); }
     if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
