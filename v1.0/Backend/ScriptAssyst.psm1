@@ -54,6 +54,21 @@ function Get-ScriptAssystGroups {
     @(foreach($g in $all | Sort-Object Name){$type=if(Test-ScriptAssystDefaultGroup $g){'Predefinito'}else{'Personalizzato'};[pscustomobject]@{Name=$g.Name;SamAccountName=$g.SamAccountName;GroupCategory=$g.GroupCategory;GroupScope=$g.GroupScope;Description=$g.Description;DistinguishedName=$g.DistinguishedName;MemberCount=@($g.Member).Count;ScriptAssystGroupType=$type}})
 }
 
+function Get-ScriptAssystOUContents {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 1024) {
+        throw 'Identità OU non valida.'
+    }
+    $ou = Get-ADOrganizationalUnit -Identity $Identity -Properties DistinguishedName -ErrorAction Stop
+    $objects = @(
+        Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -LDAPFilter '(objectClass=*)' -Properties Description,DistinguishedName,ObjectClass -ErrorAction Stop |
+        Select-Object Name,DistinguishedName,Description,@{Name='ObjectClass';Expression={ if ($_.ObjectClass -contains 'organizationalUnit') { 'organizationalUnit' } elseif ($_.ObjectClass -contains 'group') { 'group' } elseif ($_.ObjectClass -contains 'user') { 'user' } else { [string]($_.ObjectClass | Select-Object -Last 1) } }}
+    )
+    [pscustomobject]@{ ou=$ou.DistinguishedName; objects=$objects }
+}
+
 function Get-ScriptAssystOUs {
     [CmdletBinding()]
     param([string]$Query = '')
@@ -367,7 +382,7 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
+        [ValidateSet('status','dashboard','users','groups','ous','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -405,6 +420,7 @@ function Invoke-ScriptAssystRequest {
             'updateGroup' { Update-ScriptAssystGroup -Identity $Identity -GroupName $GroupName -Description $Description }
             'deleteGroup' { Remove-ScriptAssystGroup -Identity $Identity }
             'groups' { Get-ScriptAssystGroups -Query $Query }
+            'ouContents' { Get-ScriptAssystOUContents -Identity $Identity }
             'ous' { Get-ScriptAssystOUs -Query $Query }
             'gpos' { Get-ScriptAssystGpos -Query $Query }
             'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
