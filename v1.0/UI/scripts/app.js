@@ -761,7 +761,7 @@ function handleMessage(event) {
     const list=users.length?'<div class="group-members-list">'+users.map(u=>'<div class="group-option"><span><strong>'+escapeHtml(u.Name||u.SamAccountName||'Utente')+'</strong><small>'+escapeHtml(u.SamAccountName||'')+'</small><small class="dn-caption">'+escapeHtml(u.DistinguishedName||'')+'</small></span></div>').join('')+'</div>':'<p class="modal-hint">Nessun utente diretto o annidato rilevato nel gruppo.</p>';
     const body='<div class="choice-panel"><strong>'+escapeHtml(data.name||'Gruppo')+'</strong><p>L’eliminazione rimuoverà questo gruppo da Active Directory. Gli utenti elencati perderanno l’appartenenza al gruppo.</p><strong>'+users.length+' '+(users.length===1?'utente coinvolto':'utenti coinvolti')+'</strong></div>'+list+'<p class="modal-hint">Sono inclusi anche gli utenti appartenenti tramite gruppi annidati. L’eliminazione non è reversibile.</p>';
     const root=showModal('Conferma eliminazione gruppo',data.name||'','<div class="group-delete-impact">'+body+'</div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-delete-group-confirm">Elimina gruppo</button>');
-    root.querySelector('#sa-delete-group-confirm').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity:data.identity||data.DistinguishedName||identity});});
+    root.querySelector('#sa-delete-group-confirm').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity:data.identity});});
     return;
   }
   if (['userDetails','groupMembers','ouContents'].includes(result.operation) && !result.success) {
