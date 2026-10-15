@@ -750,6 +750,8 @@ function handleMessage(event) {
        wireTree();
      };
      refreshTree();search.addEventListener('input',refreshTree);
+     browser.addEventListener('sa-available-groups-loaded',refreshTree);
+     if(!Array.isArray(state.availableGroups)) send('availableGroups');
      root.querySelector('#sa-save-members').addEventListener('click',()=>{
        const keep=[...root.querySelectorAll('[data-current-member-dn]:checked')].map(x=>x.dataset.currentMemberDn);
        const add=[...root.querySelectorAll('[data-available-group-dn]:checked')].map(x=>x.dataset.availableGroupDn);
@@ -824,6 +826,7 @@ function handleMessage(event) {
   if (result.operation === 'availableGroups') {
     if(result.success && Array.isArray(result.data)) {
       state.availableGroups=result.data;
+      document.querySelector('#sa-group-browser')?.dispatchEvent(new Event('sa-available-groups-loaded'));
       const picker=document.querySelector('#sa-create-group-browser');
       if(picker && picker.dataset.waiting==='true') document.querySelector('#sa-choose-create-groups')?.click();
     } else {
