@@ -318,3 +318,6 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
 .guided-current{color:#8b9bb5;font-size:10px}
 .guided-results{max-width:1200px;margin:18px auto 0}
 @media(max-width:800px){.guided-steps{grid-template-columns:1fr}.guided-footer{flex-direction:column}.guided-card .workflow{align-items:flex-start}}
+
+/* Destructive actions use a consistent warning treatment. */
+.danger{border:1px solid #87434d;border-radius:8px;background:#542a35;color:#ffd8dd;padding:10px 14px;font:700 11px 'DM Sans';cursor:pointer}.danger:hover{background:#693440;border-color:#b65b68}.danger-text{color:#ff9aa6}.danger-text:hover{color:#ffc1c7;text-decoration:underline}
