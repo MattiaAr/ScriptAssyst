@@ -394,25 +394,32 @@ function New-ScriptAssystUser {
     New-ADUser @params
     $created = Get-ADUser -Identity $Identity -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
     $added = [System.Collections.Generic.List[string]]::new()
+    $groupWarnings = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in @($Groups)) {
         if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
         $groupIdentity = [string]$entry
         try {
-            $group = Get-ADGroup -Identity $groupIdentity -Properties SID,DistinguishedName -ErrorAction Stop
+            try {
+                $group = Get-ADGroup -Identity $groupIdentity -Properties SID,DistinguishedName -ErrorAction Stop
+            } catch {
+                $escapedGroup = $groupIdentity.Replace("'", "''")
+                $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
+                if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
+            }
+            $primaryRid = [string]$created.primaryGroupID
+            if ([string]$group.SID.Value.Split('-')[-1] -eq $primaryRid) { continue }
+            $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
+                Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
+            if ($alreadyMember) { continue }
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
+            $added.Add($group.Name)
         } catch {
-            $escapedGroup = $groupIdentity.Replace("'", "''")
-            $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
-            if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
+            $groupWarnings.Add("$($groupIdentity): $($_.Exception.Message)")
         }
-        $primaryRid = [string]$created.primaryGroupID
-        if ([string]$group.SID.Value.Split('-')[-1] -eq $primaryRid) { continue }
-        $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
-            Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
-        if ($alreadyMember) { continue }
-        Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
-        $added.Add($group.Name)
     }
-    [pscustomobject]@{ message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."; user = $created; groups = @($added) }
+    $message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
+    if ($groupWarnings.Count) { $message += " ATTENZIONE: l'account esiste, ma non è stato possibile assegnare alcuni gruppi: " + ($groupWarnings -join '; ') }
+    [pscustomobject]@{ message = $message; user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
 }
 
 function Update-ScriptAssystUserGroups {
