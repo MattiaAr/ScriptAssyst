@@ -136,3 +136,12 @@
 /* Button users: wider and less tall */
 .toolbar-actions [data-create-user]{min-width:136px;min-height:30px;padding:6px 18px;line-height:1.1}
 .directory-tag.default-tag{background:#302c43;border-color:#75668f;color:#d6c8f5}.directory-tag.custom-tag{background:#183b37;border-color:#477c70;color:#a5e8d8}
+
+/* Group form help text and searchable member picker */
+.modal-card:has(#sa-save-group){width:min(680px,calc(100vw - 32px))}
+.modal-card:has(#sa-save-group) .field-description{margin:2px 0 12px;line-height:1.5}
+.member-search-results{display:grid;gap:5px;max-height:190px;overflow:auto;margin-top:7px}
+.member-search-result{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;width:100%;padding:9px 11px;border:1px solid #2b3b54;border-radius:8px;background:#142137;color:#dce5f3;cursor:pointer}
+.member-search-result:hover,.member-search-result.selected{border-color:#55bfb2;background:#173b3b}
+.member-search-result>span:first-child{min-width:0;overflow-wrap:anywhere}.member-search-result strong,.member-search-result small{display:block}.member-search-result strong{font-size:11px}.member-search-result small{font-size:9px;color:#91a2bd;margin-top:3px}.member-search-result>span:last-child{font-size:10px;white-space:nowrap;color:#8ddfd2}
+.group-members-list label{display:flex;align-items:flex-start;gap:8px}.group-members-list label span{min-width:0;overflow-wrap:anywhere}
