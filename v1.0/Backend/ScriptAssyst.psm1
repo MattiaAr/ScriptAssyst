@@ -152,11 +152,19 @@ function Search-ScriptAssystDirectoryMembers {
     [CmdletBinding()]
     param([string]$Query = '')
     Import-Module ActiveDirectory -ErrorAction Stop
-    if ([string]::IsNullOrWhiteSpace($Query) -or $Query.Trim().Length -lt 2) { return @() }
-    $escaped=$Query.Trim().Replace("'","''")
-    $users=@(Get-ADUser -Filter "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*'" -Properties DistinguishedName,SamAccountName -ResultSetSize 20 -ErrorAction Stop | Select-Object Name,SamAccountName,DistinguishedName,@{Name='ObjectClass';Expression={'user'}})
-    $groups=@(Get-ADGroup -Filter "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*'" -Properties DistinguishedName,SamAccountName -ResultSetSize 20 -ErrorAction Stop | Select-Object Name,SamAccountName,DistinguishedName,@{Name='ObjectClass';Expression={'group'}})
-    @($users + $groups | Sort-Object Name | Select-Object -First 30)
+    $term = ([string]$Query).Trim()
+    if ([string]::IsNullOrWhiteSpace($term) -or $term.Length -lt 2) { return @() }
+
+    # Escape characters with special meaning in LDAP filters before inserting user input.
+    $ldapTerm = $term.Replace('\', '\5c').Replace('*', '\2a').Replace('(', '\28').Replace(')', '\29').Replace([string][char]0, '\00')
+    $ldapFilter = "(&(|(objectCategory=person)(objectClass=group))(|(name=*$ldapTerm*)(sAMAccountName=*$ldapTerm*)))"
+
+    # One directory query is faster than separate Get-ADUser and Get-ADGroup calls.
+    $results = @(
+        Get-ADObject -LDAPFilter $ldapFilter -Properties SamAccountName,DistinguishedName,ObjectClass -ResultSetSize 30 -ErrorAction Stop |
+        Select-Object Name,SamAccountName,DistinguishedName,ObjectClass
+    )
+    @($results | Sort-Object Name | Select-Object -First 30)
 }
 
 function Get-ScriptAssystGroupMembers {
