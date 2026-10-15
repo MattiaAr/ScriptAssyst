@@ -145,6 +145,16 @@ function searchCachedDirectoryMembers(query) {
   }).slice(0, 30);
 }
 
+function openGroupMembers(identity) {
+  const root = showModal(
+    'Caricamento membri',
+    'Lettura da Active Directory',
+    '<div class="modal-hint">Recupero dei membri del gruppo…</div>',
+    '<button class="secondary" data-modal-cancel>Annulla</button>'
+  );
+  root.dataset.groupDn = identity;
+  send('groupMembers', '', { identity });
+}
 function showMemberSearchResults(results, items, heading) {
   const holder = document.createElement('div');
   renderMemberSearchResults(holder, items);
@@ -611,7 +621,7 @@ function render() {
   content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => openUserForm('copyUser',button.dataset.copyUser)));
   content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', startCreateUserFlow));
   content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', startCreateGroupFlow));
-  content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => send('groupMembers','',{identity:button.dataset.groupMembers})));
+  content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => openGroupMembers(button.dataset.groupMembers)));
   content.querySelectorAll('[data-edit-group]').forEach(button => button.addEventListener('click', () => openGroupForm(button.dataset.editGroup)));
   content.querySelectorAll('[data-delete-group]').forEach(button => button.addEventListener('click', () => confirmDeleteGroup(button.dataset.deleteGroup)));
   content.querySelectorAll('[data-ou-open]').forEach(button => button.addEventListener('click', () => send('ouContents','',{identity:button.dataset.ouOpen})));
