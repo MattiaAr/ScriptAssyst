@@ -431,9 +431,9 @@ function Invoke-ScriptAssystRequest {
             'moveUser' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
             'resetPassword' { Invoke-ScriptAssystUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
         }
-        [pscustomobject]@{ success=$true; operation=$Operation; data=$data; error=$null }
+        [pscustomobject]@{ success=$true; operation=$Operation; query=$Query; data=$data; error=$null }
     } catch {
-        [pscustomobject]@{ success=$false; operation=$Operation; data=$null; error=$_.Exception.Message }
+        [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message }
     } finally {
         if ($Password) { $Password = $null }
     }
