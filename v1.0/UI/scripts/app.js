@@ -588,8 +588,8 @@ function openGroupForm(identity=''){
 }
 function confirmDeleteGroup(identity){
  const row=(state.data.groups||[]).find(x=>x.DistinguishedName===identity);
- const root=showModal('Elimina gruppo','Operazione irreversibile su Active Directory.','<div class="choice-panel"><strong>'+escapeHtml(row?.Name||identity)+'</strong><p>Il gruppo verrà eliminato dalla directory. Verifica che non sia utilizzato da applicazioni o autorizzazioni.</p></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-delete-group">Elimina gruppo</button>');
- root.querySelector('#sa-delete-group').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity});});
+ showModal('Verifica appartenenze','Controllo degli utenti che perderanno il gruppo…','<div class="modal-loading">Lettura dei membri del gruppo da Active Directory…</div>','<button class="secondary" data-modal-cancel>Annulla</button>');
+ send('groupDeletePreview','',{identity});
 }
 
 function openOUForm(operation, identity='') {
@@ -750,6 +750,18 @@ function handleMessage(event) {
     } else {
       showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
+    return;
+  }
+  if (result.operation === 'groupDeletePreview') {
+    if (!result.success || !result.data) {
+      showResultModal('Impossibile verificare i membri','Il gruppo non è stato eliminato.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
+      return;
+    }
+    const data=result.data, users=Array.isArray(data.users)?data.users:[];
+    const list=users.length?'<div class="group-members-list">'+users.map(u=>'<div class="group-option"><span><strong>'+escapeHtml(u.Name||u.SamAccountName||'Utente')+'</strong><small>'+escapeHtml(u.SamAccountName||'')+'</small><small class="dn-caption">'+escapeHtml(u.DistinguishedName||'')+'</small></span></div>').join('')+'</div>':'<p class="modal-hint">Nessun utente diretto o annidato rilevato nel gruppo.</p>';
+    const body='<div class="choice-panel"><strong>'+escapeHtml(data.name||'Gruppo')+'</strong><p>L’eliminazione rimuoverà questo gruppo da Active Directory. Gli utenti elencati perderanno l’appartenenza al gruppo.</p><strong>'+users.length+' '+(users.length===1?'utente coinvolto':'utenti coinvolti')+'</strong></div>'+list+'<p class="modal-hint">Sono inclusi anche gli utenti appartenenti tramite gruppi annidati. L’eliminazione non è reversibile.</p>';
+    const root=showModal('Conferma eliminazione gruppo',data.name||'','<div class="group-delete-impact">'+body+'</div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-delete-group-confirm">Elimina gruppo</button>');
+    root.querySelector('#sa-delete-group-confirm').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity:data.identity||data.DistinguishedName||identity});});
     return;
   }
   if (['userDetails','groupMembers','ouContents'].includes(result.operation) && !result.success) {
