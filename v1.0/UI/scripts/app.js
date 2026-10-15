@@ -325,7 +325,7 @@ function tablePage(page) {
         const resetAction = row.Enabled === true
           ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
           : '<span class="panel-sub">Reset non disponibile</span>';
-        return '<td><button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + '</td>';
+        return '<td><button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + ' <button class="text-button danger-text" data-delete-user="' + identity + '">Elimina</button></td>';
       }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
@@ -356,21 +356,22 @@ function showModal(title, subtitle, body, actions) {
   document.querySelector('#sa-modal-root')?.remove();
   const root = document.createElement('div');
   root.id = 'sa-modal-root';
-  root.innerHTML = '<div class="modal-backdrop" data-modal-close="true"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sa-modal-title">' +
+  root.innerHTML = '<div class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sa-modal-title">' +
     '<div class="modal-heading"><div><div class="modal-kicker">SCRIPTASSYST · ACTIVE DIRECTORY</div><h2 id="sa-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(subtitle || '') + '</p></div>' +
     '<button class="modal-x" data-modal-cancel aria-label="Chiudi">×</button></div><div class="modal-body">' + body + '</div><div class="modal-actions">' + actions + '</div></section></div>';
   document.body.appendChild(root);
   root.querySelector('.modal-card').addEventListener('click', e => e.stopPropagation());
-  root.querySelector('[data-modal-close]')?.addEventListener('click', closeModal);
   root.querySelectorAll('[data-modal-cancel]').forEach(el => el.addEventListener('click', closeModal));
   return root;
 }
-function openPasswordModal(identity, account, afterEnable = false) {
-  const root = showModal(afterEnable ? 'Account abilitato' : 'Reimposta password',
-    afterEnable ? 'Account abilitato e sbloccato. Imposta ora una nuova password.' : 'Inserisci la nuova password per questo account.',
+function openPasswordModal(identity, account, afterEnable = false, errorMessage = '') {
+  window.__scriptAssystPasswordIdentity = identity;
+  window.__scriptAssystPasswordAccount = account;
+  const root = showModal(afterEnable ? 'Abilita, cambia password e sblocca' : 'Reimposta password',
+    afterEnable ? 'L’account verrà abilitato e sbloccato solo dopo il cambio password riuscito.' : 'Inserisci la nuova password per questo account.',
     '<label class="modal-label" for="sa-password">Nuova password</label><input class="modal-input" id="sa-password" type="password" autocomplete="new-password" placeholder="Nuova password" />' +
     '<label class="modal-label" for="sa-password-repeat">Conferma password</label><input class="modal-input" id="sa-password-repeat" type="password" autocomplete="new-password" placeholder="Ripeti la password" />' +
-    '<div class="modal-hint">La policy password del dominio Active Directory verrà applicata.</div>',
+    '<div class="modal-hint">La policy password del dominio Active Directory verrà applicata.</div>' + (errorMessage ? '<div id="sa-modal-error" class="modal-error">' + escapeHtml(errorMessage) + '</div>' : ''),
     '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-password-next">Continua</button>');
   root.querySelector('#sa-password').focus();
   root.querySelector('#sa-password-next').addEventListener('click', () => {
@@ -378,16 +379,18 @@ function openPasswordModal(identity, account, afterEnable = false) {
     const repeated = root.querySelector('#sa-password-repeat').value;
     if (!password) { root.querySelector('#sa-modal-error')?.remove(); root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div id="sa-modal-error" class="modal-error">Inserisci una password.</div>'); return; }
     if (password !== repeated) { root.querySelector('#sa-modal-error')?.remove(); root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div id="sa-modal-error" class="modal-error">Le password non coincidono.</div>'); return; }
-    showPasswordChangeChoice(identity, account, password);
+    showPasswordChangeChoice(identity, account, password, afterEnable);
   });
 }
-function showPasswordChangeChoice(identity, account, password) {
+function showPasswordChangeChoice(identity, account, password, afterEnable = false) {
   const root = showModal('Cambio password al prossimo accesso?', 'Vuoi obbligare ' + account + ' a cambiare password al prossimo accesso?',
     '<div class="choice-panel"><strong>Impostazione di sicurezza</strong><p>Sì: l’utente dovrà scegliere una nuova password al prossimo accesso.<br>No: la password impostata resterà valida senza richiesta immediata di cambio.</p></div>',
     '<button class="secondary" id="sa-change-cancel">Annulla</button><button class="secondary" id="sa-change-no">No</button><button class="primary" id="sa-change-yes">Sì</button>');
   const submit = change => {
     closeModal();
-    send('resetPassword', state.queries.users || '', {operation:'resetPassword',identity,password,changePasswordAtLogon:change});
+    window.__scriptAssystPasswordIdentity = identity;
+    window.__scriptAssystPasswordAccount = account;
+    send(afterEnable ? 'enableUser' : 'resetPassword', state.queries.users || '', {operation:afterEnable ? 'enableUser' : 'resetPassword',identity,password,changePasswordAtLogon:change});
   };
   root.querySelector('#sa-change-yes').addEventListener('click', () => submit(true));
   root.querySelector('#sa-change-no').addEventListener('click', () => submit(false));
@@ -448,10 +451,7 @@ function runUserAction(operation, identity) {
       '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-action-confirm">Disabilita account</button>');
     root.querySelector('#sa-action-confirm').addEventListener('click', () => { closeModal(); send(operation, state.queries.users || '', {operation,identity}); });
   } else if (operation === 'enableUser') {
-    const root = showModal('Abilita e sblocca account', 'L’account verrà abilitato e sbloccato. Subito dopo potrai impostare una nuova password.',
-      '<div class="choice-panel"><strong>' + escapeHtml(account) + '</strong><p>Al termine ti chiederemo di inserire e confermare una nuova password.</p></div>',
-      '<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-action-confirm">Abilita e sblocca</button>');
-    root.querySelector('#sa-action-confirm').addEventListener('click', () => { closeModal(); send(operation, state.queries.users || '', {operation,identity}); });
+    openPasswordModal(identity, account, true);
   } else if (operation === 'moveUser') {
     openOuPicker(identity, account);
   } else if (operation === 'resetPassword') {
@@ -546,7 +546,11 @@ function openUserForm(operation,identity,detail=null){
     const val=id=>root.querySelector('#'+id)?.value||'';
     if(!isUpdate&&(!val('sa-account').trim()||!destination||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
     const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:destination,department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups:[...new Set([...selectedGroups.keys(),...val('sa-manual-groups').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)])],groupName:val('sa-account').trim(),changePasswordAtLogon:true};
-    closeModal();send(operation,'',payload);
+    root.querySelectorAll('input,textarea,button').forEach(el=>{if(!el.hasAttribute('data-modal-cancel'))el.disabled=true;});
+     root.dataset.pendingOperation=operation;
+     root.querySelector('.modal-actions').insertAdjacentHTML('afterbegin','<span class="modal-hint" id="sa-save-progress">Salvataggio in corso…</span>');
+     window.__scriptAssystPendingForm = {operation, payload};
+     send(operation,'',payload);
   });
   drawSelected();
 }
@@ -634,6 +638,13 @@ function confirmDeleteOU(identity) {
   root.querySelector('#sa-confirm-delete-ou').addEventListener('click',()=>{closeModal();send('deleteOU','',{identity});});
 }
 
+function confirmDeleteUser(identity) {
+  const user=(state.data.users||[]).find(u=>(u.DistinguishedName||u.SamAccountName)===identity);
+  if(!user)return;
+  const account=user.SamAccountName||user.Name||identity;
+  const root=showModal('Elimina utente', 'Conferma l’eliminazione definitiva dell’account.', '<div class="modal-error"><strong>'+escapeHtml(account)+'</strong><p>L’account verrà eliminato da Active Directory. L’operazione non è reversibile.</p><small>'+escapeHtml(identity)+'</small></div>', '<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-delete-user-confirm">Elimina utente</button>');
+  root.querySelector('#sa-delete-user-confirm').addEventListener('click',()=>{closeModal();send('deleteUser','',{operation:'deleteUser',identity});});
+}
 function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
 
 function guided() {
@@ -677,6 +688,7 @@ function render() {
   content.querySelectorAll('[data-inspect-user]').forEach(button => button.addEventListener('click', () => { state.selectedUser=button.dataset.inspectUser; send('userDetails','',{identity:button.dataset.inspectUser}); }));
   content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUserForm('updateUser',button.dataset.editUser)));
   content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => openUserForm('copyUser',button.dataset.copyUser)));
+  content.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', () => confirmDeleteUser(button.dataset.deleteUser)));
   content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', startCreateUserFlow));
   content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', startCreateGroupFlow));
   content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => openGroupMembers(button.dataset.groupMembers)));
@@ -769,11 +781,14 @@ function handleMessage(event) {
       state.data.users = null;
       requestPage('users', state.queries.users || '');
       send('dashboard');
-      if (result.operation === 'enableUser') {
-        openPasswordModal(result.data.user?.DistinguishedName || '', affected, true);
+      if (result.operation === 'enableUser' || result.operation === 'resetPassword') {
+        closeModal();
+        showModal('Operazione completata', result.data.message || 'Operazione completata.', '<div class="choice-panel"><strong>' + escapeHtml(affected) + '</strong><p>Password aggiornata' + (result.operation === 'enableUser' ? ', account abilitato e sbloccato' : '') + '.</p></div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
       } else {
         showModal('Operazione completata', result.data.message || 'Operazione completata.', '<div class="choice-panel"><strong>' + escapeHtml(affected) + '</strong><p>Le modifiche sono state inviate ad Active Directory.</p></div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
       }
+    } else if (result.operation === 'enableUser' || result.operation === 'resetPassword') {
+      openPasswordModal(window.__scriptAssystPasswordIdentity || '', window.__scriptAssystPasswordAccount || 'utente', result.operation === 'enableUser', result.error || 'Password non accettata. Inseriscine un’altra oppure annulla.');
     } else {
       showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
@@ -903,22 +918,32 @@ function handleMessage(event) {
     document.querySelectorAll('[data-open-child-ou]').forEach(button=>button.addEventListener('click',()=>{closeModal();send('ouContents','',{identity:button.dataset.openChildOu});}));
     return;
   }
-  if (['createOU','updateOU','deleteOU','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
-    if (result.success) {
+  if (['createOU','updateOU','deleteOU','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups','deleteUser'].includes(result.operation)) {
+    const userMutation = ['createUser','updateUser','copyUser','deleteUser'].includes(result.operation);
+    const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
+    const ouMutation = ['createOU','updateOU','deleteOU'].includes(result.operation);
+    if (userMutation && document.querySelector('#sa-modal-root')?.dataset.pendingOperation === result.operation) {
+      const formRoot = document.querySelector('#sa-modal-root');
+      if (result.success) {
+        closeModal();
+        window.__scriptAssystPendingForm = null;
+        showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+      } else {
+        formRoot.querySelectorAll('input,textarea,button').forEach(el=>{el.disabled=false;});
+        formRoot.querySelector('#sa-save-progress')?.remove();
+        delete formRoot.dataset.pendingOperation;
+        const oldError=formRoot.querySelector('#sa-form-error'); if(oldError) oldError.remove();
+        formRoot.querySelector('.modal-body')?.insertAdjacentHTML('beforeend','<div id="sa-form-error" class="modal-error">'+escapeHtml(result.error||'Operazione non completata. Correggi i dati e riprova.')+'</div>');
+      }
+    } else if (result.success) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
-      const userMutation = ['createUser','updateUser','copyUser'].includes(result.operation);
-      const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
-      const ouMutation = ['createOU','updateOU','deleteOU'].includes(result.operation);
-      if (ouMutation) { state.data.ous = null; if (state.page === 'ous') requestPage('ous', state.queries.ous || ''); }
-      // Keep the current DOM and cached rows visible while refreshing the affected dataset.
-      // The fresh response will replace the old data once it arrives.
-      if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
-      else if (state.page === 'groups' && groupMutation) requestPage('groups', state.queries.groups || '');
-      // Dashboard metrics are only visible on the overview page.
-      if (state.page === 'overview') send('dashboard');
     } else {
       showResultModal('Operazione non completata','Active Directory ha rifiutato la richiesta.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
     }
+    if (ouMutation) { state.data.ous = null; if (state.page === 'ous') requestPage('ous', state.queries.ous || ''); }
+    if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
+    else if (state.page === 'groups' && groupMutation) requestPage('groups', state.queries.groups || '');
+    if (state.page === 'overview') send('dashboard');
     return;
   }
   if (result.operation === 'availableGroups') {
