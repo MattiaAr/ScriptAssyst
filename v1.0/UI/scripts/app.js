@@ -637,21 +637,36 @@ function confirmDeleteOU(identity) {
 function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
 
 function guided() {
-  return '<section class="panel guided-card"><div class="step-count">PERCORSO GUIDATO</div><h2>Che cosa vuoi consultare?</h2>' +
-    '<p>Seleziona un’area per leggere i dati restituiti dal backend. In questa versione le operazioni di modifica ad Active Directory non sono abilitate.</p>' +
-    '<div class="workflow-list"><button class="workflow" data-page="users"><b>01</b><span><strong>Consultare un account</strong><small>Utenti e stato account</small></span></button>' +
-    '<button class="workflow" data-page="groups"><b>02</b><span><strong>Verificare un gruppo</strong><small>Categoria, ambito e numero di membri</small></span></button>' +
-    '<button class="workflow" data-page="ous"><b>03</b><span><strong>Esplorare le OU</strong><small>Percorsi e protezione da eliminazione</small></span></button>' +
-    '<button class="workflow" data-page="gpo"><b>04</b><span><strong>Analizzare una GPO</strong><small>Stato, proprietario e ultima modifica</small></span></button></div>' +
-    '<button class="primary" data-page="overview">Torna alla panoramica</button></section>';
+  const selectedPage = state.page !== 'overview';
+  const intro = '<section class="panel guided-card"><div class="step-count">ASSISTENTE OPERATIVO</div>' +
+    (selectedPage
+      ? '<div class="guided-toolbar"><button class="secondary" data-guided-home>← Tutte le procedure</button><span class="guided-current">Passaggio 2 di 2 · Area operativa</span></div><h2>' + escapeHtml(pages[state.page] || 'Area operativa') + '</h2><p>Consulta i dati aggiornati dal dominio. Usa la ricerca per trovare una voce; seleziona un’azione solo dopo aver verificato nome e account.</p>'
+      : '<h2>Che cosa devi fare?</h2><p>Scegli l’obiettivo. Aprire una procedura carica i dati reali da Active Directory; da lì puoi cercare le voci e usare le azioni disponibili. Le operazioni che modificano il dominio richiedono conferma.</p>') +
+    (selectedPage ? '' :
+    '<div class="guided-steps"><div><b>1</b><span><strong>Scegli un’area</strong><small>Utenti, gruppi, OU o criteri</small></span></div><div><b>2</b><span><strong>Cerca e verifica</strong><small>Controlla nome, account e percorso</small></span></div><div><b>3</b><span><strong>Esegui l’azione</strong><small>Conferma prima delle modifiche</small></span></div></div>' +
+    '<div class="workflow-list">' +
+    '<button class="workflow" data-page="users"><b>01</b><span><strong>Gestire un utente</strong><small>Cercare account, consultare dettagli, creare o modificare, abilitare/disabilitare, reimpostare password e spostare OU</small></span><span class="workflow-arrow">›</span></button>' +
+    '<button class="workflow" data-page="groups"><b>02</b><span><strong>Gestire un gruppo</strong><small>Consultare gruppi e membri, modificare appartenenze o creare ed eliminare gruppi</small></span><span class="workflow-arrow">›</span></button>' +
+    '<button class="workflow" data-page="ous"><b>03</b><span><strong>Organizzare le OU</strong><small>Esplorare la struttura, creare o modificare OU e verificare la protezione prima di eliminare</small></span><span class="workflow-arrow">›</span></button>' +
+    '<button class="workflow" data-page="gpo"><b>04</b><span><strong>Controllare i criteri GPO</strong><small>Consultare stato, proprietario e data di modifica</small></span><span class="workflow-arrow">›</span></button>' +
+    '<button class="workflow" data-page="tasks"><b>05</b><span><strong>Consultare le attività pianificate</strong><small>Cercare attività, percorso e stato</small></span><span class="workflow-arrow">›</span></button></div>' +
+    '<div class="guided-note"><strong>Prima di confermare</strong><span>Verifica sempre l’oggetto selezionato. Le modifiche in Active Directory possono avere effetti immediati sugli utenti e sui permessi.</span></div>') +
+    '</section>';
+  return intro + (selectedPage
+    ? '<div class="guided-results">' + tablePage(state.page) + '</div>'
+    : '<div class="guided-footer"><span>Modalità guidata</span><span>Le procedure usano i dati restituiti dal backend, senza dati dimostrativi.</span></div>');
 }
 function render() {
   document.querySelector('#page-title').textContent = state.mode === 'guided' ? 'Modalità guidata' : pages[state.page];
   content.innerHTML = state.mode === 'guided' ? guided() :
     state.page === 'overview' ? overview() : tablePage(state.page);
+  content.querySelectorAll('[data-guided-home]').forEach(el => el.addEventListener('click', () => {
+    state.page = 'overview';
+    render();
+  }));
   content.querySelectorAll('[data-page]').forEach(el => el.addEventListener('click', () => {
     state.page = el.dataset.page;
-    state.mode = 'dashboard';
+    if (state.mode !== 'guided') state.mode = 'dashboard';
     document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x.dataset.page === state.page));
     document.querySelectorAll('.mode').forEach(x => x.classList.toggle('active', x.dataset.mode === state.mode));
     render();
@@ -944,7 +959,7 @@ function handleMessage(event) {
     state.errors[page] = result.error || 'Risposta non valida dal backend.';
     state.data[page] = null;
   }
-  if (state.page === page && state.mode === 'dashboard') render();
+  if (state.page === page) render();
 }
 document.querySelectorAll('.mode').forEach(button => button.addEventListener('click', () => {
   state.mode = button.dataset.mode;
