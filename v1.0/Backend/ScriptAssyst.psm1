@@ -80,6 +80,48 @@ function Get-ScriptAssystOUs {
         Select-Object Name,Description,DistinguishedName,ProtectedFromAccidentalDeletion)
 }
 
+function New-ScriptAssystOU {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name,[string]$Path='',[string]$Description='')
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $nameValue=$Name.Trim()
+    if ([string]::IsNullOrWhiteSpace($nameValue) -or $nameValue.Length -gt 64 -or $nameValue -match '[,+"\\<>;=]') { throw 'Nome OU non valido (massimo 64 caratteri; evitare , + " \ < > ; =).' }
+    if ([string]::IsNullOrWhiteSpace($Path)) { $parent=(Get-ADDomain -ErrorAction Stop).DistinguishedName }
+    else { $parent=(Get-ADOrganizationalUnit -Identity $Path -ErrorAction Stop).DistinguishedName }
+    $escaped=$nameValue.Replace("'","''")
+    if (Get-ADOrganizationalUnit -SearchBase $parent -SearchScope OneLevel -Filter "Name -eq '$escaped'" -ErrorAction Stop) { throw "Esiste già una OU chiamata '$nameValue' in questa posizione." }
+    $created=New-ADOrganizationalUnit -Name $nameValue -Path $parent -Description $Description -PassThru -ErrorAction Stop
+    [pscustomobject]@{message="OU '$nameValue' creata.";ou=$created.DistinguishedName}
+}
+function Update-ScriptAssystOU {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[Parameter(Mandatory)][string]$Name,[string]$Description='')
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $ou=Get-ADOrganizationalUnit -Identity $Identity -Properties Description,ProtectedFromAccidentalDeletion -ErrorAction Stop
+    $nameValue=$Name.Trim()
+    if ([string]::IsNullOrWhiteSpace($nameValue) -or $nameValue.Length -gt 64 -or $nameValue -match '[,+"\\<>;=]') { throw 'Nome OU non valido (massimo 64 caratteri; evitare , + " \ < > ; =).' }
+    $parentDn=($ou.DistinguishedName -split ',',2)[1]
+    $escaped=$nameValue.Replace("'","''")
+    $siblings=@(Get-ADOrganizationalUnit -SearchBase $parentDn -SearchScope OneLevel -Filter "Name -eq '$escaped'" -ErrorAction Stop | Where-Object { $_.DistinguishedName -ine $ou.DistinguishedName })
+    if ($siblings.Count) { throw "Esiste già una OU chiamata '$nameValue' nella stessa posizione." }
+    Set-ADOrganizationalUnit -Identity $ou.DistinguishedName -Description $Description -ErrorAction Stop
+    if ($ou.Name -cne $nameValue) { Rename-ADObject -Identity $ou.DistinguishedName -NewName $nameValue -ErrorAction Stop }
+    $updatedDn=if($ou.Name -cne $nameValue){"OU=$nameValue,$parentDn"}else{$ou.DistinguishedName}
+    $updated=Get-ADOrganizationalUnit -Identity $updatedDn -ErrorAction Stop
+    [pscustomobject]@{message="OU '$nameValue' aggiornata.";ou=$updated.DistinguishedName}
+}
+function Remove-ScriptAssystOU {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $ou=Get-ADOrganizationalUnit -Identity $Identity -Properties ProtectedFromAccidentalDeletion -ErrorAction Stop
+    if ($ou.ProtectedFromAccidentalDeletion) { throw "La OU '$($ou.Name)' è protetta dall'eliminazione. Disattiva prima la protezione in Active Directory." }
+    $children=@(Get-ADObject -SearchBase $ou.DistinguishedName -SearchScope OneLevel -LDAPFilter '(objectClass=*)' -ErrorAction Stop)
+    if ($children.Count) { throw "La OU '$($ou.Name)' non è vuota. Sposta o elimina prima gli oggetti e le sotto-OU contenuti." }
+    Remove-ADOrganizationalUnit -Identity $ou.DistinguishedName -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{message="OU '$($ou.Name)' eliminata."}
+}
+
 function Get-ScriptAssystGpos {
     [CmdletBinding()]
     param([string]$Query = '')
@@ -382,7 +424,7 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
+        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -421,6 +463,9 @@ function Invoke-ScriptAssystRequest {
             'deleteGroup' { Remove-ScriptAssystGroup -Identity $Identity }
             'groups' { Get-ScriptAssystGroups -Query $Query }
             'ouContents' { Get-ScriptAssystOUContents -Identity $Identity }
+            'createOU' { New-ScriptAssystOU -Name $GroupName -Path $Path -Description $Description }
+            'updateOU' { Update-ScriptAssystOU -Identity $Identity -Name $GroupName -Description $Description }
+            'deleteOU' { Remove-ScriptAssystOU -Identity $Identity }
             'ous' { Get-ScriptAssystOUs -Query $Query }
             'gpos' { Get-ScriptAssystGpos -Query $Query }
             'tasks' { Get-ScriptAssystScheduledTasks -Query $Query }
