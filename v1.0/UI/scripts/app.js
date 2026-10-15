@@ -111,6 +111,7 @@ const pageConfig = {
 const treeExpanded = { groups: new Set(), ous: new Set() };
 let groupMemberSelections = new Set();
 let groupMemberSearchTimeout = null;
+const groupMemberRemoteCache = new Map();
 
 function renderMemberSearchResults(results, items) {
   const chosen = groupMemberSelections;
@@ -142,6 +143,19 @@ function searchCachedDirectoryMembers(query) {
     return [item.Name, item.SamAccountName, item.DistinguishedName, item.Description]
       .some(value => String(value || '').toLocaleLowerCase('it').includes(term));
   }).slice(0, 30);
+}
+
+function showMemberSearchResults(results, items, heading) {
+  const holder = document.createElement('div');
+  renderMemberSearchResults(holder, items);
+  results.replaceChildren();
+  if (heading) {
+    const note = document.createElement('p');
+    note.className = 'modal-hint';
+    note.textContent = heading;
+    results.appendChild(note);
+  }
+  results.append(...holder.childNodes);
 }
 function dnParent(dn) {
   const parts = String(dn || '').split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
@@ -740,18 +754,39 @@ function handleMessage(event) {
     const body='<h3 class="modal-section-title">Membri attuali</h3><div class="group-members-list">'+(members.map(m=>'<label><input type="checkbox" checked data-member-dn="'+escapeHtml(m.DistinguishedName)+'"> <span>'+escapeHtml(m.Name)+' <small>'+escapeHtml(m.ObjectClass)+'</small><small class="dn-caption">'+escapeHtml(m.DistinguishedName)+'</small></span></label>').join('')||'<p class="modal-hint">Il gruppo non contiene membri.</p>')+'</div><h3 class="modal-section-title">Aggiungi membri</h3><p class="modal-hint">Cerca per nome o account e seleziona un risultato, oppure inserisci direttamente un DN completo. Puoi aggiungere utenti e gruppi.</p><input class="modal-input" id="sa-member-search" type="search" placeholder="Cerca nome o account (almeno 2 caratteri)…" autocomplete="off"><div id="sa-member-search-results" class="member-search-results"></div><label class="modal-label" for="sa-add-members">DN da aggiungere manualmente</label><textarea class="modal-input" id="sa-add-members" placeholder="CN=Mario Rossi,OU=Utenti,DC=homelab,DC=local (uno per riga)"></textarea><div class="modal-hint">I risultati selezionati e i DN manuali vengono aggiunti al gruppo al salvataggio.</div>';
     const root=showModal('Membri del gruppo',result.data.name||result.data.group||'',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-group-members">Salva membri</button>');
     const search=root.querySelector('#sa-member-search'),results=root.querySelector('#sa-member-search-results');let searchTimer=null;
-    search.addEventListener('input',()=>{clearTimeout(searchTimer);clearTimeout(groupMemberSearchTimeout);const q=search.value.trim();if(q.length<2){results.innerHTML='<p class="modal-hint">Digita almeno 2 caratteri per cercare.</p>';return;}searchTimer=setTimeout(()=>{const local=searchCachedDirectoryMembers(q);if(local.length){results.innerHTML='<p class="modal-hint">Risultati dalla cache locale.</p>';const holder=document.createElement('div');renderMemberSearchResults(holder,local);results.innerHTML='<p class="modal-hint">Risultati dalla cache locale.</p>';results.append(...holder.childNodes);return;}results.innerHTML='<p class="modal-hint">Nessun risultato locale. Ricerca in Active Directory…</p>';send('searchDirectoryMembers',q,{operation:'searchDirectoryMembers'});groupMemberSearchTimeout=setTimeout(()=>{const current=document.querySelector('#sa-member-search-results');if(current&&current.textContent.includes('Ricerca in Active Directory'))current.innerHTML='<div class="modal-error">La ricerca non ha ricevuto risposta entro 15 secondi. Verifica la connessione al dominio e riprova.</div>';},15000);},150);});
+    search.addEventListener('input',()=>{
+      clearTimeout(searchTimer);
+      clearTimeout(groupMemberSearchTimeout);
+      const q=search.value.trim();
+      if(q.length<2){results.innerHTML='<p class="modal-hint">Digita almeno 2 caratteri per cercare.</p>';return;}
+      const key=q.toLocaleLowerCase('it');
+      const local=searchCachedDirectoryMembers(q);
+      if(local.length){showMemberSearchResults(results,local,'Risultati dalla cache locale.');return;}
+      if(groupMemberRemoteCache.has(key)){showMemberSearchResults(results,groupMemberRemoteCache.get(key),'Risultati memorizzati dalla ricerca AD.');return;}
+      results.innerHTML='<p class="modal-hint">Nessun risultato locale. Ricerca in Active Directory…</p>';
+      searchTimer=setTimeout(()=>{
+        send('searchDirectoryMembers',q,{operation:'searchDirectoryMembers'});
+        groupMemberSearchTimeout=setTimeout(()=>{
+          const current=document.querySelector('#sa-member-search-results');
+          if(current&&search.value.trim().toLocaleLowerCase('it')===key&&current.textContent.includes('Ricerca in Active Directory'))
+            current.innerHTML='<div class="modal-error">La ricerca non ha ricevuto risposta entro 15 secondi. Verifica la connessione al dominio e riprova.</div>';
+        },15000);
+      },180);
+    });
     root.querySelector('#sa-save-group-members').addEventListener('click',()=>{const keep=[...root.querySelectorAll('[data-member-dn]:checked')].map(x=>x.dataset.memberDn),manual=root.querySelector('#sa-add-members').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),members=[...new Set(keep.concat([...groupMemberSelections],manual))];closeModal();send('updateGroupMembers','',{operation:'updateGroupMembers',identity:result.data.group,members});});
     root.dataset.groupDn=result.data.group;
     return;
   }
   if (result.operation === 'searchDirectoryMembers') {
-    clearTimeout(groupMemberSearchTimeout);
+    const responseQuery=String(result.query||'').trim();
+    const responseKey=responseQuery.toLocaleLowerCase('it');
     const root=document.querySelector('.modal-card');if(!root||!root.dataset.groupDn)return;
     const results=root.querySelector('#sa-member-search-results');if(!results)return;
+    if(result.success&&Array.isArray(result.data)) groupMemberRemoteCache.set(responseKey,result.data);
+    if(root.querySelector('#sa-member-search').value.trim().toLocaleLowerCase('it')!==responseKey)return;
+    clearTimeout(groupMemberSearchTimeout);
     if(!result.success||!Array.isArray(result.data)){results.innerHTML='<div class="modal-error">'+escapeHtml(result.error||'Ricerca non riuscita')+'</div>';return;}
-    renderMemberSearchResults(results, result.data);
-    if (!result.data.length) results.insertAdjacentHTML('afterbegin','<p class="modal-hint">Nessun risultato in Active Directory.</p>');
+    showMemberSearchResults(results,result.data,result.data.length?'Risultati da Active Directory.':'Nessun risultato in Active Directory.');
     return;
   }
   if (result.operation === 'ouContents' && result.success && result.data) {
