@@ -803,9 +803,8 @@ function handleMessage(event) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
       const userMutation = ['createUser','updateUser','copyUser'].includes(result.operation);
       const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
-      if (userMutation) state.data.users = null;
-      if (groupMutation) state.data.groups = null;
-      // Refresh only the affected dataset, and only when its page is active.
+      // Keep the current DOM and cached rows visible while refreshing the affected dataset.
+      // The fresh response will replace the old data once it arrives.
       if (state.page === 'users' && userMutation) requestPage('users', state.queries.users || '');
       else if (state.page === 'groups' && groupMutation) requestPage('groups', state.queries.groups || '');
       // Dashboard metrics are only visible on the overview page.
