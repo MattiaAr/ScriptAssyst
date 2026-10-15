@@ -148,6 +148,17 @@ function Test-ScriptAssystDefaultGroup {
     $rid=if($sid -match '-(\d+)$'){[int]$Matches[1]}else{-1}
     return ($builtin -or (@(498,499,500,501,502,512,513,514,515,516,517,518,519,520,521,522,525,526,527,553,571,572) -contains $rid))
 }
+function Search-ScriptAssystDirectoryMembers {
+    [CmdletBinding()]
+    param([string]$Query = '')
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Query) -or $Query.Trim().Length -lt 2) { return @() }
+    $escaped=$Query.Trim().Replace("'","''")
+    $users=@(Get-ADUser -Filter "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*'" -Properties DistinguishedName,SamAccountName -ResultSetSize 20 -ErrorAction Stop | Select-Object Name,SamAccountName,DistinguishedName,@{Name='ObjectClass';Expression={'user'}})
+    $groups=@(Get-ADGroup -Filter "Name -like '*$escaped*' -or SamAccountName -like '*$escaped*'" -Properties DistinguishedName,SamAccountName -ResultSetSize 20 -ErrorAction Stop | Select-Object Name,SamAccountName,DistinguishedName,@{Name='ObjectClass';Expression={'group'}})
+    @($users + $groups | Sort-Object Name | Select-Object -First 30)
+}
+
 function Get-ScriptAssystGroupMembers {
     param([Parameter(Mandatory)][string]$Identity)
     Import-Module ActiveDirectory -ErrorAction Stop
@@ -366,7 +377,7 @@ function Invoke-ScriptAssystRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
+        [ValidateSet('status','dashboard','users','groups','ous','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','deleteGroup')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -398,6 +409,7 @@ function Invoke-ScriptAssystRequest {
             'createUser' { New-ScriptAssystUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'updateUserGroups' { Update-ScriptAssystUserGroups -Identity $Identity -Groups $Groups }
             'groupMembers' { Get-ScriptAssystGroupMembers -Identity $Identity }
+            'searchDirectoryMembers' { Search-ScriptAssystDirectoryMembers -Query $Query }
             'updateGroupMembers' { Update-ScriptAssystGroupMembers -Identity $Identity -Members $Members }
             'createGroup' { New-ScriptAssystGroup -GroupName $GroupName -Path $Path -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
             'updateGroup' { Update-ScriptAssystGroup -Identity $Identity -GroupName $GroupName -Description $Description }
