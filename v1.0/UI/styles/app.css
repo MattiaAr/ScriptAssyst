@@ -291,3 +291,7 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
   .page-toolbar .search { width: 100%; }
   .toolbar-actions { flex-wrap: wrap; }
 }
+
+.group-delete-warning{display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding:11px 12px;border:1px solid #8c762e;border-radius:8px;background:#332d17;color:#fff0a6;line-height:1.5;font-size:12px}
+.group-delete-warning-icon{flex:0 0 auto;color:#ffd43b;font-size:25px;line-height:1;font-weight:900;text-shadow:0 0 8px #ffd43b55}
+.group-delete-warning strong{color:#fff0a6;font-size:12px}
