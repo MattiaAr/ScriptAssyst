@@ -51,12 +51,13 @@ internal sealed class MainForm : Form
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        string? operation = null;
         try
         {
             using var message = JsonDocument.Parse(e.WebMessageAsJson);
             if (!message.RootElement.TryGetProperty("operation", out var operationElement))
                 throw new InvalidOperationException("Richiesta priva dell'operazione.");
-            var operation = operationElement.GetString();
+            operation = operationElement.GetString();
             if (operation is null || !AllowedOperations.Contains(operation))
                 throw new InvalidOperationException("Operazione non consentita.");
 
@@ -106,7 +107,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { success = false, error = ex.Message }));
+            view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { success = false, operation, data = (object?)null, error = ex.Message }));
         }
     }
 }
