@@ -1,10 +1,25 @@
+# .NET build and IDE output
+**/bin/
+**/obj/
+**/.vs/
+*.user
+*.suo
+
+# User-specific credentials and secrets
 cred_tecnico.xml
 *.xml
 *.pfx
 *.key
 *.pem
-Logs/
+*.env
+.env.*
+
+# Runtime output
+**/Logs/
 *.log
-*.txt
 *.tmp
 *.bak
+
+# Local publish output
+**/publish/
+**/artifacts/
