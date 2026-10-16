@@ -358,7 +358,7 @@ function showModal(title, subtitle, body, actions) {
   const root = document.createElement('div');
   root.id = 'sa-modal-root';
   root.innerHTML = '<div class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sa-modal-title">' +
-    '<div class="modal-heading"><div><div class="modal-kicker">SCRIPTASSYST · ACTIVE DIRECTORY</div><h2 id="sa-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(subtitle || '') + '</p></div>' +
+    '<div class="modal-heading"><div><div class="modal-kicker">DashboardAD · ACTIVE DIRECTORY</div><h2 id="sa-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(subtitle || '') + '</p></div>' +
     '<button class="modal-x" data-modal-cancel aria-label="Chiudi">×</button></div><div class="modal-body">' + body + '</div><div class="modal-actions">' + actions + '</div></section></div>';
   document.body.appendChild(root);
   root.querySelector('.modal-card').addEventListener('click', e => e.stopPropagation());
@@ -366,8 +366,8 @@ function showModal(title, subtitle, body, actions) {
   return root;
 }
 function openPasswordModal(identity, account, afterEnable = false, errorMessage = '') {
-  window.__scriptAssystPasswordIdentity = identity;
-  window.__scriptAssystPasswordAccount = account;
+  window.__DashboardADPasswordIdentity = identity;
+  window.__DashboardADPasswordAccount = account;
   const root = showModal(afterEnable ? 'Abilita, cambia password e sblocca' : 'Reimposta password',
     afterEnable ? 'L’account verrà abilitato e sbloccato solo dopo il cambio password riuscito.' : 'Inserisci la nuova password per questo account.',
     '<label class="modal-label" for="sa-password">Nuova password</label><input class="modal-input" id="sa-password" type="password" autocomplete="new-password" placeholder="Nuova password" />' +
@@ -389,8 +389,8 @@ function showPasswordChangeChoice(identity, account, password, afterEnable = fal
     '<button class="secondary" id="sa-change-cancel">Annulla</button><button class="secondary" id="sa-change-no">No</button><button class="primary" id="sa-change-yes">Sì</button>');
   const submit = change => {
     closeModal();
-    window.__scriptAssystPasswordIdentity = identity;
-    window.__scriptAssystPasswordAccount = account;
+    window.__DashboardADPasswordIdentity = identity;
+    window.__DashboardADPasswordAccount = account;
     send(afterEnable ? 'enableUser' : 'resetPassword', state.queries.users || '', {operation:afterEnable ? 'enableUser' : 'resetPassword',identity,password,changePasswordAtLogon:change});
   };
   root.querySelector('#sa-change-yes').addEventListener('click', () => submit(true));
@@ -558,7 +558,7 @@ function openUserForm(operation,identity,detail=null){
     root.querySelectorAll('input,textarea,button').forEach(el=>{if(!el.hasAttribute('data-modal-cancel'))el.disabled=true;});
      root.dataset.pendingOperation=operation;
      root.querySelector('.modal-actions').insertAdjacentHTML('afterbegin','<span class="modal-hint" id="sa-save-progress">Salvataggio in corso…</span>');
-     window.__scriptAssystPendingForm = {operation, payload};
+     window.__DashboardADPendingForm = {operation, payload};
      send(operation,'',payload);
   });
   drawSelected();
@@ -802,7 +802,7 @@ function handleMessage(event) {
         showModal('Operazione completata', result.data.message || 'Operazione completata.', '<div class="choice-panel"><strong>' + escapeHtml(affected) + '</strong><p>Le modifiche sono state inviate ad Active Directory.</p></div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
       }
     } else if (result.operation === 'enableUser' || result.operation === 'resetPassword') {
-      openPasswordModal(window.__scriptAssystPasswordIdentity || '', window.__scriptAssystPasswordAccount || 'utente', result.operation === 'enableUser', result.error || 'Password non accettata. Inseriscine un’altra oppure annulla.');
+      openPasswordModal(window.__DashboardADPasswordIdentity || '', window.__DashboardADPasswordAccount || 'utente', result.operation === 'enableUser', result.error || 'Password non accettata. Inseriscine un’altra oppure annulla.');
     } else {
       showModal('Operazione non completata', 'Active Directory ha rifiutato la richiesta.', '<div class="modal-error">' + escapeHtml(result.error || 'Errore non specificato') + '</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
     }
@@ -958,7 +958,7 @@ function handleMessage(event) {
       const formRoot = document.querySelector('#sa-modal-root');
       if (result.success) {
         closeModal();
-        window.__scriptAssystPendingForm = null;
+        window.__DashboardADPendingForm = null;
         showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
       } else {
         formRoot.querySelectorAll('input,textarea,button').forEach(el=>{el.disabled=false;});
