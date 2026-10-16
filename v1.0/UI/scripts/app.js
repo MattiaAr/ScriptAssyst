@@ -11,7 +11,8 @@ const state = {
   sort: { users: { key: 'Name', direction: 'asc' }, gpo: { key: 'DisplayName', direction: 'asc' }, tasks: { key: 'TaskName', direction: 'asc' } },
   selectedUser: null,
   selectedGroup: null,
-  selectedOu: null
+  selectedOu: null,
+  pendingDeleteOU: null
 };
 
 const pages = {
@@ -83,7 +84,7 @@ function overview() {
 const pageConfig = {
   users: {
     operation: 'users', title: 'Utenti', search: 'Cerca per nome, account o reparto…',
-    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['DistinguishedName', 'Distinguished name'], ['Enabled', 'Stato'], ['Actions', 'Azioni']],
+    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['Enabled', 'Stato'], ['Actions', 'Azioni']],
     render: row => [row.Name, row.SamAccountName, row.Department || '—', row.DistinguishedName, row.Enabled === true ? 'Abilitato' : 'Disabilitato', row]
   },
   groups: {
@@ -325,7 +326,7 @@ function tablePage(page) {
         const resetAction = row.Enabled === true
           ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
           : '<span class="panel-sub">Reset non disponibile</span>';
-        return '<td><button class="text-button" data-edit-user="' + identity + '">Modifica</button> <button class="text-button" data-copy-user="' + identity + '">Copia</button> ' + stateAction + ' <button class="text-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button> ' + resetAction + ' <button class="text-button danger-text" data-delete-user="' + identity + '">Elimina</button></td>';
+        return '<td class="user-actions"><button class="user-action-button" data-edit-user="' + identity + '">Modifica</button><button class="user-action-button" data-copy-user="' + identity + '">Copia</button>' + stateAction.replace('class="text-button"','class="user-action-button"') + '<button class="user-action-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button>' + resetAction.replace('class="text-button"','class="user-action-button"') + '<button class="user-action-button danger-action" data-delete-user="' + identity + '">Elimina</button></td>';
       }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
@@ -642,7 +643,12 @@ function openOUForm(operation, identity='') {
 function confirmDeleteOU(identity) {
   const ou=(state.data.ous||[]).find(o=>o.DistinguishedName===identity);
   if(!ou)return;
-  const root=showModal('Elimina unità organizzativa',ou.Name,'<div class="choice-panel"><strong>Eliminazione di '+escapeHtml(ou.Name)+'</strong><p>Puoi eliminare questa unità organizzativa solo se non contiene utenti, gruppi, computer o sotto-OU e se la protezione dall’eliminazione è disattivata.</p><p>L’operazione è definitiva e non può essere annullata.</p><small class="dn-caption">'+escapeHtml(identity)+'</small></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-confirm-delete-ou">Elimina unità organizzativa</button>');
+  state.pendingDeleteOU=identity;
+  showModal('Verifica unità organizzativa',ou.Name,'<div class="choice-panel"><p>Sto verificando se questa OU contiene utenti, gruppi, computer o sotto-OU prima di procedere.</p></div>','<button class="secondary" data-modal-cancel>Annulla</button>');
+  send('ouContents','',{identity});
+}
+function showConfirmDeleteOU(identity, name) {
+  const root=showModal('Elimina unità organizzativa',name,'<div class="choice-panel"><strong>OU vuota: '+escapeHtml(name)+'</strong><p>La verifica non ha rilevato oggetti direttamente contenuti. Puoi procedere solo se la protezione dall’eliminazione è disattivata.</p><p>L’operazione è definitiva e non può essere annullata.</p><small class="dn-caption">'+escapeHtml(identity)+'</small></div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-confirm-delete-ou">Elimina unità organizzativa</button>');
   root.querySelector('#sa-confirm-delete-ou').addEventListener('click',()=>{closeModal();send('deleteOU','',{identity});});
 }
 
@@ -917,6 +923,24 @@ function handleMessage(event) {
     clearTimeout(groupMemberSearchTimeout);
     if(!result.success||!Array.isArray(result.data)){results.innerHTML='<div class="modal-error">'+escapeHtml(result.error||'Ricerca non riuscita')+'</div>';return;}
     showMemberSearchResults(results,result.data,result.data.length?'Risultati da Active Directory.':'Nessun risultato in Active Directory.');
+    return;
+  }
+  if (result.operation === 'ouContents' && state.pendingDeleteOU) {
+    const identity=state.pendingDeleteOU;
+    state.pendingDeleteOU=null;
+    if (!result.success || !result.data) {
+      showResultModal('Impossibile verificare la OU','L’eliminazione è stata bloccata.','<div class="modal-error">'+escapeHtml(result.error||'Non è stato possibile leggere il contenuto dell’unità organizzativa.')+'</div>');
+      return;
+    }
+    const objs=Array.isArray(result.data.objects)?result.data.objects:[];
+    const ou=(state.data.ous||[]).find(o=>o.DistinguishedName===identity);
+    const name=ou?.Name||identity;
+    if (objs.length) {
+      const list='<div class="ou-contents-list">'+objs.map(o=>'<div class="ou-content-row"><strong>'+escapeHtml(o.Name||'Oggetto senza nome')+'</strong><span>'+escapeHtml(o.ObjectClass||'oggetto')+'</span><small>'+escapeHtml(o.Description||o.DistinguishedName||'')+'</small></div>').join('')+'</div>';
+      showResultModal('Eliminazione non consentita',name,'<div class="group-delete-warning"><strong>Questa OU contiene '+objs.length+' '+(objs.length===1?'oggetto':'oggetti')+'.</strong><p>Sposta o elimina prima gli oggetti elencati. La OU non è stata eliminata.</p></div>'+list);
+      return;
+    }
+    showConfirmDeleteOU(identity,name);
     return;
   }
   if (result.operation === 'ouContents' && result.success && result.data) {
