@@ -1,4 +1,4 @@
-# ScriptAssyst v1.0 — prototipo iniziale
+# Dashboard AD v1.0
 
 La nuova versione è separata dallo script legacy presente nella root del repository.
 
