@@ -1,0 +1,12 @@
+{
+  "ActiveDirectory": {
+    "PrimaryDC": "WIN-DC01.homelab.local",
+    "SecondaryDC": "WIN-DC02.homelab.local",
+    "UPNSuffix": "homelab.local",
+    "ExpectedAdminUsername": "",
+    "AdminCredentialPath": "C:\\ProgramData\\ScriptAssyst\\admin-credential.xml"
+  },
+  "Logging": {
+    "Path": "C:\\ProgramData\\ScriptAssyst\\Logs\\ScriptAssyst.log"
+  }
+}
