@@ -1,7 +1,9 @@
 {
   "ActiveDirectory": {
     "PrimaryDC": "WIN-DC01.homelab.local",
+    "PrimaryDCIP": "192.168.1.200",
     "SecondaryDC": "WIN-DC02.homelab.local",
+    "SecondaryDCIP": "192.168.1.202",
     "UPNSuffix": "homelab.local",
     "ExpectedAdminUsername": "",
     "AdminCredentialPath": "C:\\ProgramData\\DashboardAD\\admin-credential.xml"
