@@ -364,8 +364,12 @@ function New-ScriptAssystUser {
     if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Selezionare una OU valida.' }
     if ([string]::IsNullOrEmpty($Password)) { throw 'La password iniziale è obbligatoria.' }
     if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
-        $domain = Get-ADDomain -ErrorAction Stop
-        $UserPrincipalName = "$Identity@$($domain.DNSRoot)"
+        $upnSuffix = [string]$global:ScriptAssystConfig.ActiveDirectory.UPNSuffix
+        if ([string]::IsNullOrWhiteSpace($upnSuffix)) {
+            $domain = Get-ADDomain -ErrorAction Stop
+            $upnSuffix = [string]$domain.DNSRoot
+        }
+        $UserPrincipalName = "$Identity@$upnSuffix"
     }
     if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+$') { throw 'User Principal Name non valido. Usa il formato nome@dominio.' }
     $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
