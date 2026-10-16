@@ -61,14 +61,6 @@ internal sealed class MainForm : Form
             if (operation is null || !AllowedOperations.Contains(operation))
                 throw new InvalidOperationException("Operazione non consentita.");
 
-            if (message.RootElement.TryGetProperty("query", out var queryElement))
-            {
-                if (queryElement.ValueKind != JsonValueKind.String)
-                    throw new InvalidOperationException("Il parametro query deve essere testuale.");
-                if ((queryElement.GetString() ?? "").Length > 128)
-                    throw new InvalidOperationException("Il parametro query supera 128 caratteri.");
-            }
-
             var query = "";
             if (message.RootElement.TryGetProperty("query", out var queryElement))
             {
