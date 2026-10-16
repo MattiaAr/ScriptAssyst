@@ -775,6 +775,15 @@ function handleMessage(event) {
     if (result.success && result.data) {
       state.status = result.data;
       const connected = Boolean(result.data.adConnected);
+      const operator = String(result.data.operator || '').trim();
+      const account = operator.includes('\\') ? operator.split('\\').pop() : operator;
+      const initials = account ? account.replace(/[^a-zA-ZÀ-ÿ0-9]/g, '').slice(0, 2).toUpperCase() : '—';
+      const avatar = document.querySelector('.avatar');
+      if (avatar) {
+        avatar.textContent = initials;
+        avatar.title = operator ? 'Operatore: ' + operator : 'Operatore non disponibile';
+        avatar.setAttribute('aria-label', avatar.title);
+      }
       const label = document.querySelector('#connection-label');
       const environment = document.querySelector('.environment');
       if (label) label.textContent = connected ? 'AD · ' + (result.data.domain || 'connesso') : 'Active Directory offline';
