@@ -1,6 +1,6 @@
-# AD-Chatbot Tecnico
+# Dashboard AD
 
-Progetto PowerShell per automatizzare operazioni Active Directory da un PC tecnico collegato via VPN, evitando l'accesso RDP al Domain Controller.
+Dashboard AD è uno strumento desktop per la gestione delle operazioni Active Directory da un PC tecnico.
 
 Versione iniziale: v0.2.
 
