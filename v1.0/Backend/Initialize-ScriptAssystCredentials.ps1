@@ -3,7 +3,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$configPath = Join-Path $PSScriptRoot 'ScriptAssyst.config.json'
+$configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ScriptAssyst.config.json'
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     throw "File di configurazione non trovato: $configPath"
 }
