@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace ScriptAssyst.Desktop;
+namespace DashboardAD.Desktop;
 
 internal static class Program
 {
@@ -27,7 +27,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "ScriptAssyst v1.0";
+        Text = "Dashboard AD v1.0";
         Width = 1280;
         Height = 820;
         MinimumSize = new Size(900, 620);
@@ -42,7 +42,7 @@ internal sealed class MainForm : Form
         var page = Path.Combine(root, "UI", "index.html");
         if (!File.Exists(page))
         {
-            MessageBox.Show($"Interfaccia non trovata: {page}", "ScriptAssyst");
+            MessageBox.Show($"Interfaccia non trovata: {page}", "Dashboard AD");
             Close();
             return;
         }
@@ -71,7 +71,7 @@ internal sealed class MainForm : Form
                     throw new InvalidOperationException("Il parametro query supera 128 caratteri.");
             }
 
-            var script = Path.Combine(root, "Backend", "Start-ScriptAssyst.ps1");
+            var script = Path.Combine(root, "Backend", "Start-DashboardAD.ps1");
             if (!File.Exists(script))
                 throw new FileNotFoundException("Backend PowerShell non trovato.", script);
 
