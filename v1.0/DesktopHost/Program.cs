@@ -18,11 +18,11 @@ internal static class Program
 internal sealed class MainForm : Form
 {
     private readonly WebView2 view = new() { Dock = DockStyle.Fill };
-    private readonly string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    private readonly string root = AppContext.BaseDirectory;
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
-        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "deleteUser", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups", "groupMembers", "updateGroupMembers"
+        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "deleteUser", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups"
     };
 
     public MainForm()
