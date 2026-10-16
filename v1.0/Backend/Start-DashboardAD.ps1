@@ -95,12 +95,25 @@ try {
     if ($credential -isnot [System.Management.Automation.PSCredential]) { throw 'Il file credenziali non contiene un oggetto PSCredential valido.' }
     $expectedUser = [string]$config.ActiveDirectory.ExpectedAdminUsername
     if (-not [string]::IsNullOrWhiteSpace($expectedUser) -and $credential.UserName -ne $expectedUser) { throw "L'account nel file credenziali ($($credential.UserName)) non corrisponde a ExpectedAdminUsername ($expectedUser)." }
-    $candidates = @([string]$config.ActiveDirectory.PrimaryDC)
-    if (-not [string]::IsNullOrWhiteSpace([string]$config.ActiveDirectory.SecondaryDC)) { $candidates += [string]$config.ActiveDirectory.SecondaryDC }
-    foreach ($candidate in $candidates) {
-        if (Test-DashboardADTcpPort -Server $candidate -Port 9389) { $selectedDC = $candidate; break }
+    # Prova prima il nome DNS (preferibile per Kerberos); usa l'IP opzionale solo se il nome non risponde.
+    $dcCandidates = @(
+        [pscustomobject]@{ Name = [string]$config.ActiveDirectory.PrimaryDC; IP = [string]$config.ActiveDirectory.PrimaryDCIP },
+        [pscustomobject]@{ Name = [string]$config.ActiveDirectory.SecondaryDC; IP = [string]$config.ActiveDirectory.SecondaryDCIP }
+    )
+    foreach ($dc in $dcCandidates) {
+        if (-not [string]::IsNullOrWhiteSpace($dc.Name) -and (Test-DashboardADTcpPort -Server $dc.Name -Port 9389)) {
+            $selectedDC = $dc.Name
+            break
+        }
+        if (-not [string]::IsNullOrWhiteSpace($dc.IP) -and (Test-DashboardADTcpPort -Server $dc.IP -Port 9389)) {
+            $selectedDC = $dc.IP
+            break
+        }
     }
-    if (-not $selectedDC) { throw "Nessun controller configurato risponde sulla porta AD Web Services (9389): $($candidates -join ', ')." }
+    if (-not $selectedDC) {
+        $candidates = @($dcCandidates | ForEach-Object { @($_.Name, $_.IP) } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        throw "Nessun controller configurato risponde sulla porta AD Web Services (9389): $($candidates -join ', ')."
+    }
     $global:DashboardADConfig = $config
     $global:DashboardADSelectedDC = $selectedDC
     $global:PSDefaultParameterValues['*-AD*:Server'] = $selectedDC
