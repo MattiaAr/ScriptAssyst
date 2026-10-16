@@ -321,3 +321,6 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
 
 /* Destructive actions use a consistent warning treatment. */
 .danger{border:1px solid #87434d;border-radius:8px;background:#542a35;color:#ffd8dd;padding:10px 14px;font:700 11px 'DM Sans';cursor:pointer}.danger:hover{background:#693440;border-color:#b65b68}.danger-text{color:#ff9aa6}.danger-text:hover{color:#ffc1c7;text-decoration:underline}
+
+/* User table actions: distinct, compact action buttons. */
+.user-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:310px}.user-action-button{border:1px solid #34445f;border-radius:6px;background:#1b2940;color:#dbe7f5;padding:6px 9px;font:600 10px 'DM Sans';cursor:pointer;white-space:nowrap}.user-action-button:hover{border-color:#75dccc;background:#243750;color:#fff}.user-action-button.danger-action{border-color:#87434d;background:#422631;color:#ffd8dd}.user-action-button.danger-action:hover{border-color:#b65b68;background:#542a35}
