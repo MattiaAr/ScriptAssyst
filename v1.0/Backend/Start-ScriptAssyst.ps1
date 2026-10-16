@@ -59,7 +59,7 @@ if ($ReadRequestFromStdin) {
     $json = $null
     $request = $null
 }
-$configPath = Join-Path $PSScriptRoot 'ScriptAssyst.config.json'
+$configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ScriptAssyst.config.json'
 $selectedDC = $null
 $config = $null
 $credential = $null
