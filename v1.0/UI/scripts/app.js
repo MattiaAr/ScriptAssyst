@@ -83,9 +83,9 @@ function overview() {
 }
 const pageConfig = {
   users: {
-    operation: 'users', title: 'Utenti', search: 'Cerca per nome, account o reparto…',
-    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Department', 'Reparto'], ['Enabled', 'Stato'], ['Actions', 'Azioni']],
-    render: row => [row.Name, row.SamAccountName, row.Department || '—', row.Enabled === true ? 'Abilitato' : 'Disabilitato', row]
+    operation: 'users', title: 'Utenti', search: 'Cerca per nome, account o descrizione…',
+    columns: [['Name', 'Nome'], ['SamAccountName', 'Account'], ['Description', 'Descrizione'], ['Enabled', 'Stato'], ['Actions', 'Azioni']],
+    render: row => [row.Name, row.SamAccountName, row.Description || '—', row.Enabled === true ? 'Abilitato' : 'Disabilitato', row]
   },
   groups: {
     operation: 'groups', title: 'Gruppi', search: 'Cerca per nome, account o descrizione…',
