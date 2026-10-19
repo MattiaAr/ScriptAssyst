@@ -9,6 +9,7 @@
     "AdminCredentialPath": "C:\\ProgramData\\DashboardAD\\admin-credential.xml"
   },
   "Logging": {
-    "Path": "C:\\ProgramData\\DashboardAD\\Logs\\DashboardAD.log"
+    "Path": "C:\\ProgramData\\DashboardAD\\Logs\\DashboardAD.jsonl",
+    "MaxLogSizeMB": 2
   }
 }
