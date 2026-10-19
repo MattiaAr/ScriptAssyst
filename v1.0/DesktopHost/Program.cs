@@ -96,9 +96,9 @@ internal sealed class MainForm : Form
             {
                 timestamp = DateTimeOffset.UtcNow.ToString("O"),
                 eventType = "session",
-                @operator = string.IsNullOrWhiteSpace(Environment.UserDomain)
+                @operator = string.IsNullOrWhiteSpace(Environment.UserDomainName)
                     ? Environment.UserName
-                    : Environment.UserDomain + "\\" + Environment.UserName,
+                    : Environment.UserDomainName + "\\" + Environment.UserName,
                 adminAccount = adminAccount ?? "",
                 sourceComputer = Environment.MachineName,
                 domainController = controller ?? "",
