@@ -369,7 +369,29 @@ function Set-DashboardADUser {
         if([string]::IsNullOrWhiteSpace([string]$field.Value)){$clear.Add([string]$field.Attribute)}else{$set[[string]$field.Key]=[string]$field.Value}
     }
     if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
-        if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+
+        if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+$') {
+            throw 'User Principal Name non valido. Usa il formato nome@dominio.'
+        }
+        $set.UserPrincipalName = $UserPrincipalName
+    }
+
+    Set-ADUser @set
+    if ($clear.Count -gt 0) {
+        Set-ADUser -Identity $user.DistinguishedName -Clear $clear.ToArray() -ErrorAction Stop
+    }
+    if (@($Groups).Count -gt 0) {
+        Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
+    }
+
+    Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
+}
+
+function New-DashboardADUser {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Identity,
+        [Parameter(Mandatory)][string]$DestinationOU,
+        [Parameter(Mandatory)][string]$Password,
         [string]$GivenName = '',
         [string]$Surname = '',
         [string]$DisplayName = '',
