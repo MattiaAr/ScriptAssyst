@@ -989,8 +989,11 @@ function handleMessage(event) {
         const oldError=formRoot.querySelector('#sa-form-error'); if(oldError) oldError.remove();
         const modalBody=formRoot.querySelector('.modal-body');
         if(modalBody){
-          const message=result.error||'Operazione non completata. Correggi i dati e riprova.';
-          const title=result.operation==='createUser'&&/password|password|compless|lunghezza|history|cronologia/i.test(message)?'Password non conforme alla policy del dominio':'Operazione non completata';
+          let message=result.error||'Operazione non completata. Correggi i dati e riprova.';
+          if(result.operation==='createUser'&&/value does not fall within the expected range/i.test(message)){
+            message='Active Directory ha rifiutato la password. Potrebbe non rispettare i requisiti di complessità, la cronologia delle password o una policy specifica del dominio. La creazione non è stata completata: verifica la policy password e riprova con una password nuova.';
+          }
+          const title=result.operation==='createUser'&&/password|compless|lunghezza|history|cronologia/i.test(message)?'Password non conforme alla policy del dominio':'Operazione non completata';
           modalBody.insertAdjacentHTML('afterbegin','<div id="sa-form-error" class="modal-error" role="alert"><strong>'+escapeHtml(title)+'</strong><p>'+escapeHtml(message)+'</p></div>');
           modalBody.scrollTop=0;
           formRoot.querySelector('#sa-form-error')?.focus?.();
