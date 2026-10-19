@@ -1,4 +1,6 @@
 const state = {
+  language: (() => { try { return localStorage.getItem('dashboardad-language') === 'en' ? 'en' : 'it'; } catch (_) { return 'it'; } })(),
+  logFiles: [], selectedLogFile: '', logsLoading: false, logsError: null,
   page: 'overview',
   mode: 'dashboard',
   status: null,
@@ -18,12 +20,22 @@ const state = {
 
 const pages = {
   overview: 'Panoramica',
+  logs: 'Log di audit',
   users: 'Utenti',
   groups: 'Gruppi',
   ous: 'Unità organizzative',
   gpo: 'Criteri GPO',
   tasks: 'Attività pianificate'
 };
+const translations = {"MODALITÀ":"MODE","Gestione Active Directory":"Active Directory Management","Verifica connessione…":"Checking connection…","Verifica Active Directory…":"Checking Active Directory…","Panoramica":"Overview","Utenti":"Users","Gruppi":"Groups","Unità organizzative":"Organizational Units","Criteri GPO":"Group Policy","Attività pianificate":"Scheduled Tasks","Modalità guidata":"Guided mode","GESTIONE DIRECTORY":"DIRECTORY MANAGEMENT","Panoramica ambiente":"Environment overview","Metriche disponibili dopo la connessione ad Active Directory.":"Metrics are available after connecting to Active Directory.","Dominio non connesso":"Domain not connected","CONNESSIONE AD NON DISPONIBILE":"ACTIVE DIRECTORY CONNECTION UNAVAILABLE","Utenti censiti":"Users","Account restituiti da Active Directory":"Accounts returned by Active Directory","Gruppi del dominio":"Domain groups","OU del dominio":"Domain organizational units","Criteri di gruppo rilevati":"Detected Group Policies","Stato connessione":"Connection status","Informazioni restituite dal backend":"Information returned by the backend","Active Directory connesso":"Active Directory connected","Active Directory non disponibile":"Active Directory unavailable","In attesa del backend":"Waiting for backend","Disponibile":"Available","Non disponibile":"Unavailable","Modulo ActiveDirectory":"ActiveDirectory module","Modulo GroupPolicy":"GroupPolicy module","Aree di lavoro":"Work areas","Consulta i dati correnti del dominio o del computer":"View current domain or computer data","Account AD":"AD account","Gruppi e membri":"Groups and members","Struttura OU":"OU structure","Criteri di gruppo":"Group Policy","I dati visualizzati provengono dal backend; nessun dato dimostrativo viene usato come fallback.":"Displayed data comes from the backend; no demo data is used as a fallback.","Nome":"Name","Descrizione":"Description","Stato":"Status","Azioni":"Actions","Categoria":"Category","Ambito":"Scope","Membri":"Members","Nome OU":"OU name","Percorso":"Path","Protezione eliminazione":"Deletion protection","Nome criterio":"Policy name","Ultima modifica":"Last modified","Proprietario":"Owner","Attività":"Task","Autore":"Author","Cerca per nome, account o descrizione…":"Search by name, account, or description…","Cerca per nome OU…":"Search OU name…","Cerca per nome criterio…":"Search policy name…","Cerca per nome o percorso…":"Search name or path…","Abilitato":"Enabled","Disabilitato":"Disabled","Attiva":"Active","Non attiva":"Inactive","Protetta":"Protected","Non protetta":"Not protected","Modifica":"Edit","Copia":"Copy","Abilita":"Enable","Disabilita":"Disable","Reset non disponibile":"Reset unavailable","Sposta OU":"Move OU","Elimina":"Delete","Nuovo utente":"New user","Caricamento dati dal backend…":"Loading data from backend…","Nessun risultato restituito dal backend.":"No results returned by the backend.","Aggiornamento in corso…":"Updating…","dati ricevuti dal backend":"data returned by the backend","Ordina per ":"Sort by ","ASSISTENTE OPERATIVO":"OPERATIONS ASSISTANT","Che cosa devi fare?":"What do you need to do?","← Tutte le procedure":"← All procedures","Passaggio 2 di 2 · Area operativa":"Step 2 of 2 · Workspace","Scegli un’area":"Choose an area","Utenti, gruppi, OU o criteri":"Users, groups, OUs, or policies","Cerca e verifica":"Search and verify","Controlla nome, account e percorso":"Check name, account, and path","Esegui l’azione":"Perform the action","Conferma prima delle modifiche":"Confirm before changes","Gestire un utente":"Manage a user","Gestire un gruppo":"Manage a group","Organizzare le OU":"Organize OUs","Controllare i criteri GPO":"Review Group Policy","Consultare le attività pianificate":"View scheduled tasks","Prima di confermare":"Before confirming","LOG DI AUDIT":"AUDIT LOGS","Log di audit":"Audit logs","Storico operazioni":"Operation history","Consulta i singoli file JSONL e i dettagli strutturati di ogni evento. Visualizzazione in sola lettura.":"Browse individual JSONL files and structured event details. Read-only view.","File di log":"Log files","Aggiorna":"Refresh","Nessun file di log trovato.":"No log files found.","Nessun evento registrato in questo file.":"No events recorded in this file.","Esito":"Result","Riuscita":"Succeeded","Fallita":"Failed","JSON originale":"Raw JSON","File attivo":"Active file","Ruotato":"Rotated","Lettura dei file di audit in corso…":"Reading audit files…","Errore di lettura dei log":"Error reading logs","Il file di audit non è disponibile.":"The audit log is unavailable.","Operatore Windows":"Windows operator","PC sorgente":"Source computer","Controller":"Domain controller","Azione":"Action","Oggetto":"Target","Errore":"Error","Ticket":"Ticket","Chiudi":"Close","Annulla":"Cancel","Conferma":"Confirm","Salva":"Save","Crea":"Create","Elimina utente":"Delete user","Elimina gruppo":"Delete group","Elimina OU":"Delete OU","Dettagli":"Details","Impossibile caricare le metriche.":"Unable to load metrics.","Risposta non valida dal backend.":"Invalid response from backend.","Operatore non disponibile":"Operator unavailable","Lingua interfaccia":"Interface language"};
+const reverseTranslations = Object.fromEntries(Object.entries(translations).map(([it,en]) => [en,it]));
+function applyLanguage(root = document.body) {
+ const language=state.language||'it'; document.documentElement.lang=language;
+ const translate=value=>{const raw=String(value??''),key=raw.trim();if(!key)return raw;const mapped=language==='en'?translations[key]:reverseTranslations[key];return mapped===undefined||mapped===key?raw:raw.replace(key,mapped);};
+ const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
+ for(const node of nodes){const parent=node.parentElement;if(parent&&(/^(SCRIPT|STYLE|PRE|CODE)$/i.test(parent.tagName)||parent.closest('td,.directory-label,.dn-caption,.log-event-type,.log-event-head h3,.log-event-target,.log-event-error,.log-detail strong,.detail-item strong,.avatar,.directory-meta,.directory-tag,.pill,.user-actions,.member-search-result,.ou-content-row')))continue;const value=translate(node.nodeValue);if(value!==node.nodeValue)node.nodeValue=value;}
+ if(root.querySelectorAll)root.querySelectorAll('[title],[placeholder],[aria-label]').forEach(element=>{for(const attr of ['title','placeholder','aria-label'])if(element.hasAttribute(attr)){const before=element.getAttribute(attr),after=translate(before);if(before!==after)element.setAttribute(attr,after);}});
+}
 const content = document.querySelector('#app-content');
 const hasBridge = Boolean(window.chrome && window.chrome.webview);
 
@@ -362,6 +374,7 @@ function showModal(title, subtitle, body, actions) {
     '<div class="modal-heading"><div><div class="modal-kicker">DashboardAD · ACTIVE DIRECTORY</div><h2 id="sa-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(subtitle || '') + '</p></div>' +
     '<button class="modal-x" data-modal-cancel aria-label="Chiudi">×</button></div><div class="modal-body">' + body + '</div><div class="modal-actions">' + actions + '</div></section></div>';
   document.body.appendChild(root);
+  applyLanguage(root);
   root.querySelector('.modal-card').addEventListener('click', e => e.stopPropagation());
   root.querySelectorAll('[data-modal-cancel]').forEach(el => el.addEventListener('click', closeModal));
   return root;
@@ -687,10 +700,25 @@ function guided() {
     ? '<div class="guided-results">' + tablePage(state.page) + '</div>'
     : '<div class="guided-footer"><span>Modalità guidata</span><span>Le procedure usano i dati restituiti dal backend, senza dati dimostrativi.</span></div>');
 }
+function logsPage() {
+ const files=Array.isArray(state.logFiles)?state.logFiles:[],selected=files.find(file=>file.name===state.selectedLogFile)||files[0]||null;
+ if(selected&&selected.name!==state.selectedLogFile)state.selectedLogFile=selected.name;
+ const fileCards=files.map(file=>{const active=selected&&file.name===selected.name,modified=file.lastWriteUtc?new Date(file.lastWriteUtc).toLocaleString(state.language==='en'?'en-GB':'it-IT'):'—';const size=file.sizeBytes<1048576?(file.sizeBytes/1024).toFixed(1)+' KB':(file.sizeBytes/1048576).toFixed(2)+' MB';return '<button type="button" class="log-file-card '+(active?'selected':'')+'" data-log-file="'+escapeHtml(file.name)+'"><span class="log-file-icon">JSONL</span><span class="log-file-copy"><strong>'+escapeHtml(file.name)+'</strong><small>'+escapeHtml(modified)+'</small></span><span class="log-file-count">'+escapeHtml(file.eventCount)+'<small>eventi</small></span></button>';}).join('');
+ const records=selected&&Array.isArray(selected.records)?[...selected.records].reverse():[];
+ const events=records.map(entry=>{const timestamp=entry.timestamp?new Date(entry.timestamp).toLocaleString(state.language==='en'?'en-GB':'it-IT'):'—',success=entry.success===true;
+ const details=[['Operatore Windows',entry.operator],['Account AD',entry.adminAccount],['PC sorgente',entry.sourceComputer],['Controller',entry.domainController],['Azione',entry.action],['Oggetto',entry.target],['Ticket',entry.ticket],['Errore',entry.error]].filter(pair=>pair[1]!==null&&pair[1]!==undefined&&pair[1]!=='');
+ const detailMarkup=details.map(([label,value])=>'<div class="log-detail"><small>'+escapeHtml(label)+'</small><strong>'+escapeHtml(value)+'</strong></div>').join('');
+ return '<article class="log-event '+(success?'event-success':'event-failed')+'"><div class="log-event-rail"><span></span></div><div class="log-event-main"><div class="log-event-head"><div><span class="log-event-type">'+escapeHtml(entry.eventType||'event')+'</span><h3>'+escapeHtml(entry.action||'Evento di audit')+'</h3><p>'+escapeHtml(timestamp)+'</p></div><span class="audit-status '+(success?'success':'failed')+'">'+(success?'Riuscita':'Fallita')+'</span></div>'+(entry.target?'<div class="log-event-target">'+escapeHtml(entry.target)+'</div>':'')+(entry.error?'<div class="log-event-error">'+escapeHtml(entry.error)+'</div>':'')+'<div class="log-event-details">'+detailMarkup+'</div><details class="log-json"><summary>JSON originale</summary><pre>'+escapeHtml(JSON.stringify(entry,null,2))+'</pre></details></div></article>';
+ }).join('');
+ return '<div class="logs-heading"><div><div class="eyebrow">LOG DI AUDIT</div><h2>Storico operazioni</h2><p>Consulta i singoli file JSONL e i dettagli strutturati di ogni evento. Visualizzazione in sola lettura.</p></div><button class="secondary" id="sa-refresh-logs" type="button">Aggiorna</button></div>'+(state.logsLoading?'<div class="choice-panel">Lettura dei file di audit in corso…</div>':'')+(state.logsError?'<div class="notice">'+escapeHtml(state.logsError)+'</div>':'')+'<div class="logs-layout"><aside class="logs-file-panel"><div class="logs-panel-head"><div><h3>File di log</h3><p>'+files.length+' file disponibili</p></div></div>'+(fileCards||'<div class="empty">Nessun file di log trovato.</div>')+'</aside><section class="logs-events-panel">'+(selected?'<div class="logs-panel-head selected-log-heading"><div><h3>'+escapeHtml(selected.name)+'</h3><p>'+selected.eventCount+' eventi · '+escapeHtml(selected.sizeBytes<1048576?(selected.sizeBytes/1024).toFixed(1)+' KB':(selected.sizeBytes/1048576).toFixed(2)+' MB')+'</p></div><span class="log-file-badge">'+(selected.active?'File attivo':'Ruotato')+'</span></div>'+(events||'<div class="empty">Nessun evento registrato in questo file.</div>'):'<div class="empty">Seleziona un file per consultare gli eventi registrati.</div>')+'</section></div>';
+}
 function render() {
-  document.querySelector('#page-title').textContent = state.mode === 'guided' ? 'Modalità guidata' : pages[state.page];
-  content.innerHTML = state.mode === 'guided' ? guided() :
-    state.page === 'overview' ? overview() : tablePage(state.page);
+  document.querySelector('#page-title').textContent = state.mode === 'guided' ? 'Modalità guidata' : (state.mode === 'logs' ? 'Log di audit' : pages[state.page]);
+  content.innerHTML = state.mode === 'logs' ? logsPage() : (state.mode === 'guided' ? guided() :
+    state.page === 'overview' ? overview() : tablePage(state.page));
+  applyLanguage(content);
+  content.querySelectorAll('[data-log-file]').forEach(button => button.addEventListener('click', () => { state.selectedLogFile = button.dataset.logFile; render(); }));
+  content.querySelector('#sa-refresh-logs')?.addEventListener('click', () => { state.logsLoading = true; state.logsError = null; render(); send('readLogs'); });
   content.querySelectorAll('[data-guided-home]').forEach(el => el.addEventListener('click', () => {
     state.page = 'overview';
     render();
@@ -774,27 +802,17 @@ function render() {
     }, 120);
   });
 }
-function showAuditLogs(records) {
-  const all = Array.isArray(records) ? records : [];
-  const visible = all.slice(-500).reverse();
-  const rows = visible.map(entry => {
-    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—';
-    const status = entry.success ? '<span class="audit-status success">Riuscita</span>' : '<span class="audit-status failed">Fallita</span>';
-    return '<tr><td>'+escapeHtml(timestamp)+'</td><td>'+escapeHtml(entry.operator||'—')+'</td><td>'+escapeHtml(entry.adminAccount||'—')+'</td><td>'+escapeHtml(entry.sourceComputer||'—')+'</td><td>'+escapeHtml(entry.domainController||'—')+'</td><td>'+escapeHtml(entry.action||'—')+'</td><td class="audit-target">'+escapeHtml(entry.target||'—')+'</td><td>'+status+'</td><td class="audit-error">'+escapeHtml(entry.error||'')+'</td></tr>';
-  }).join('');
-  const body = '<div class="audit-log-toolbar"><span>'+all.length+' eventi registrati'+(all.length>visible.length?' · visualizzati gli ultimi '+visible.length:'')+'</span><button class="secondary" id="sa-refresh-logs" type="button">Aggiorna</button></div>' +
-    (visible.length
-      ? '<div class="audit-log-table-wrap"><table class="data-table audit-log-table"><thead><tr><th>Data e ora</th><th>Operatore Windows</th><th>Account AD</th><th>PC sorgente</th><th>Controller</th><th>Azione</th><th>Oggetto</th><th>Esito</th><th>Errore</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-      : '<div class="choice-panel">Nessun evento di audit presente.</div>');
-  const root = showModal('Log di audit', 'Consultazione in sola lettura · file JSONL locali', body, '<button class="primary" data-modal-cancel>Chiudi</button>');
-  root.querySelector('#sa-refresh-logs')?.addEventListener('click', () => send('readLogs'));
-}
 function handleMessage(event) {
   const result = event.data;
   if (!result || !result.operation) return;
   if (result.operation === 'readLogs') {
-    if (result.success && Array.isArray(result.data)) showAuditLogs(result.data);
-    else showResultModal('Impossibile leggere i log', 'Il file di audit non è disponibile.', '<div class="modal-error">'+escapeHtml(result.error || 'Errore di lettura non specificato')+'</div>');
+    state.logsLoading = false;
+    if (result.success && result.data && Array.isArray(result.data.files)) {
+      state.logFiles = result.data.files;
+      if (!state.logFiles.some(file => file.name === state.selectedLogFile)) state.selectedLogFile = state.logFiles[0]?.name || '';
+      state.logsError = null;
+    } else state.logsError = result.error || 'Errore di lettura dei log';
+    if (state.mode === 'logs') render();
     return;
   }
   if (result.operation === 'status') {
@@ -1077,7 +1095,11 @@ function handleMessage(event) {
 document.querySelectorAll('.mode').forEach(button => button.addEventListener('click', () => {
   state.mode = button.dataset.mode;
   document.querySelectorAll('.mode').forEach(item => item.classList.toggle('active', item === button));
+  document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', state.mode !== 'logs' && item.dataset.page === state.page));
   render();
+  if (state.mode === 'logs') { state.logsLoading = true; render(); send('readLogs'); }
+  else if (state.mode === 'dashboard' && state.page === 'overview') send('dashboard');
+  else if (state.mode === 'dashboard' && pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
 }));
 document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => {
   state.page = button.dataset.page;
@@ -1088,10 +1110,16 @@ document.querySelectorAll('.nav-item').forEach(button => button.addEventListener
   if (state.page === 'overview') send('dashboard');
   else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
 }));
-document.querySelector('#open-logs')?.addEventListener('click', () => send('readLogs'));
-document.querySelector('#clear-logs')?.addEventListener('click', () => {
-  showModal('Svuota log', 'Funzionalità non ancora disponibile.', '<div class="choice-panel">Option not yet implemented</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
+document.querySelector('#language-select')?.addEventListener('change', event => {
+ state.language = event.target.value === 'en' ? 'en' : 'it';
+ try { localStorage.setItem('dashboardad-language', state.language); } catch (_) {}
+ applyLanguage(document.body); render();
 });
+const languageObserver = new MutationObserver(() => applyLanguage(document.body));
+languageObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+const languageSelect = document.querySelector('#language-select');
+if (languageSelect) languageSelect.value = state.language;
+applyLanguage(document.body);
 if (hasBridge) {
   window.chrome.webview.addEventListener('message', handleMessage);
   send('status');
