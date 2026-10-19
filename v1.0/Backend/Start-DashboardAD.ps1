@@ -22,7 +22,8 @@ param(
     [string]$GroupName = '',
     [string]$GroupCategory = 'Security',
     [string]$GroupScope = 'Global',
-    [string[]]$Members = @()
+    [string[]]$Members = @(),
+    [bool]$ProtectedFromAccidentalDeletion = $true
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -52,6 +53,7 @@ if ($ReadRequestFromStdin) {
     if ($properties.ContainsKey('groupCategory') -and $null -ne $properties['groupCategory']) { $GroupCategory = [string]$properties['groupCategory'] }
     if ($properties.ContainsKey('groupScope') -and $null -ne $properties['groupScope']) { $GroupScope = [string]$properties['groupScope'] }
     if ($properties.ContainsKey('members') -and $null -ne $properties['members']) { $Members = @($properties['members'] | ForEach-Object { [string]$_ }) }
+    if ($properties.ContainsKey('protectedFromAccidentalDeletion') -and $null -ne $properties['protectedFromAccidentalDeletion']) { $ProtectedFromAccidentalDeletion = [bool]$properties['protectedFromAccidentalDeletion'] }
     if ($properties.ContainsKey('password')) { $properties['password'] = $null }
     $properties.Clear()
     $json = $null
@@ -120,7 +122,7 @@ try {
     $global:PSDefaultParameterValues['*-AD*:Credential'] = $credential
     Write-DashboardADLog "INFO operation=$Operation dc=$selectedDC account=$($credential.UserName)"
     Import-Module (Join-Path $PSScriptRoot 'DashboardAD.psm1') -Force
-    $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members
+    $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
     Write-DashboardADLog ("{0} operation={1} dc={2}{3}" -f $(if ($result.success) {'INFO'} else {'ERROR'}), $Operation, $selectedDC, $(if ($result.error) {" error=$($result.error)"} else {''}))
     $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
