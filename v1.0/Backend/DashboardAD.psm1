@@ -271,8 +271,8 @@ function Update-DashboardADGroup {
     $duplicates=@(Get-ADGroup -Filter "Name -eq '$escaped' -or SamAccountName -eq '$escaped'" -ErrorAction Stop | Where-Object {$_.DistinguishedName -ine $g.DistinguishedName})
     if($duplicates.Count){throw "Esiste già un gruppo con nome o account '$name'."}
     Set-ADGroup -Identity $g.DistinguishedName -SamAccountName $name -Description $Description -ErrorAction Stop
-    Rename-ADObject -Identity $g.DistinguishedName -NewName $GroupName -ErrorAction Stop
-    [pscustomobject]@{message="Gruppo aggiornato: '$GroupName'."}
+    Rename-ADObject -Identity $g.DistinguishedName -NewName $name -ErrorAction Stop
+    [pscustomobject]@{message="Gruppo aggiornato: '$name'."}
 }
 function Get-DashboardADGroupDeletePreview {
     [CmdletBinding()]
