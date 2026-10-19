@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -22,7 +23,7 @@ internal sealed class MainForm : Form
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
-        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "deleteUser", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups"
+        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "deleteUser", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups", "readLogs"
     };
 
     public MainForm()
@@ -37,6 +38,7 @@ internal sealed class MainForm : Form
 
     private async Task InitializeViewAsync()
     {
+        WriteAuditEvent("session_start", "", true, null, null);
         await view.EnsureCoreWebView2Async();
         view.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
         var page = Path.Combine(root, "UI", "index.html");
@@ -47,6 +49,111 @@ internal sealed class MainForm : Form
             return;
         }
         view.Source = new Uri(page);
+    }
+
+    private string GetConfiguredLogPath()
+    {
+        var configPath = Path.Combine(root, "DashboardAD.config.json");
+        using var config = JsonDocument.Parse(File.ReadAllText(configPath, Encoding.UTF8));
+        var configured = config.RootElement.GetProperty("Logging").GetProperty("Path").GetString();
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("Logging.Path non è configurato.");
+        return Environment.ExpandEnvironmentVariables(configured);
+    }
+
+    private int GetConfiguredMaxLogSizeMb()
+    {
+        try
+        {
+            using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "DashboardAD.config.json"), Encoding.UTF8));
+            if (config.RootElement.GetProperty("Logging").TryGetProperty("MaxLogSizeMB", out var size) &&
+                size.TryGetInt32(out var value) && value > 0)
+                return value;
+        }
+        catch { }
+        return 2;
+    }
+
+    private void WriteAuditEvent(string action, string target, bool success, string? error, string? adminAccount)
+    {
+        try
+        {
+            var logPath = GetConfiguredLogPath();
+            var directory = Path.GetDirectoryName(logPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            string? controller = null;
+            try
+            {
+                using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "DashboardAD.config.json"), Encoding.UTF8));
+                controller = config.RootElement.GetProperty("ActiveDirectory").GetProperty("PrimaryDC").GetString();
+                adminAccount ??= config.RootElement.GetProperty("ActiveDirectory").GetProperty("ExpectedAdminUsername").GetString();
+            }
+            catch { }
+
+            var record = new
+            {
+                timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                eventType = "session",
+                @operator = string.IsNullOrWhiteSpace(Environment.UserDomain)
+                    ? Environment.UserName
+                    : Environment.UserDomain + "\\" + Environment.UserName,
+                adminAccount = adminAccount ?? "",
+                sourceComputer = Environment.MachineName,
+                domainController = controller ?? "",
+                action,
+                target,
+                success,
+                error = success ? null : error,
+                ticket = (string?)null
+            };
+            var line = JsonSerializer.Serialize(record);
+            var bytes = Encoding.UTF8.GetByteCount(line + Environment.NewLine);
+            var maxBytes = (long)GetConfiguredMaxLogSizeMb() * 1024 * 1024;
+            var info = new FileInfo(logPath);
+            if (info.Exists && info.Length + bytes > maxBytes)
+            {
+                var stem = Path.GetFileNameWithoutExtension(logPath);
+                var extension = Path.GetExtension(logPath);
+                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+                var rotatedPath = Path.Combine(directory ?? root, $"{stem}-{stamp}{extension}");
+                var suffix = 1;
+                while (File.Exists(rotatedPath))
+                    rotatedPath = Path.Combine(directory ?? root, $"{stem}-{stamp}-{suffix++}{extension}");
+                File.Move(logPath, rotatedPath);
+            }
+            File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
+    private string ReadAuditLogsResponse()
+    {
+        var logPath = GetConfiguredLogPath();
+        var directory = Path.GetDirectoryName(logPath) ?? root;
+        var stem = Path.GetFileNameWithoutExtension(logPath);
+        var extension = Path.GetExtension(logPath);
+        var files = Directory.Exists(directory)
+            ? Directory.GetFiles(directory, stem + "*" + extension)
+                .OrderBy(File.GetLastWriteTimeUtc)
+                .ToArray()
+            : Array.Empty<string>();
+        var records = new List<JsonElement>();
+        foreach (var file in files)
+        {
+            foreach (var line in File.ReadLines(file, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var parsed = JsonDocument.Parse(line);
+                    records.Add(parsed.RootElement.Clone());
+                }
+                catch { }
+            }
+        }
+        return JsonSerializer.Serialize(new { success = true, operation = "readLogs", data = records, error = (string?)null });
     }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -60,6 +167,12 @@ internal sealed class MainForm : Form
             operation = operationElement.GetString();
             if (operation is null || !AllowedOperations.Contains(operation))
                 throw new InvalidOperationException("Operazione non consentita.");
+
+            if (operation == "readLogs")
+            {
+                view.CoreWebView2.PostWebMessageAsJson(ReadAuditLogsResponse());
+                return;
+            }
 
             var query = "";
             if (message.RootElement.TryGetProperty("query", out var queryElement))
