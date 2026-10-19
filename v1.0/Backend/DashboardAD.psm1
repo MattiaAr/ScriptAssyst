@@ -462,7 +462,10 @@ function Update-DashboardADUserGroups {
         $sidText = [string]$group.SID.Value
         $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
             $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
-        if ($protected) { throw "Il gruppo di sistema '$($group.Name)' non può essere modificato da questa schermata." }
+        if ($protected) {
+            if ($currentDns -contains $group.DistinguishedName) { continue }
+            throw "Il gruppo di sistema '$($group.Name)' non può essere aggiunto da questa schermata."
+        }
         $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
     }
     $added = [System.Collections.Generic.List[string]]::new()
