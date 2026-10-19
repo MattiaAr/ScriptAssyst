@@ -774,9 +774,29 @@ function render() {
     }, 120);
   });
 }
+function showAuditLogs(records) {
+  const all = Array.isArray(records) ? records : [];
+  const visible = all.slice(-500).reverse();
+  const rows = visible.map(entry => {
+    const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '—';
+    const status = entry.success ? '<span class="audit-status success">Riuscita</span>' : '<span class="audit-status failed">Fallita</span>';
+    return '<tr><td>'+escapeHtml(timestamp)+'</td><td>'+escapeHtml(entry.operator||'—')+'</td><td>'+escapeHtml(entry.action||'—')+'</td><td class="audit-target">'+escapeHtml(entry.target||'—')+'</td><td>'+status+'</td><td class="audit-error">'+escapeHtml(entry.error||'')+'</td></tr>';
+  }).join('');
+  const body = '<div class="audit-log-toolbar"><span>'+all.length+' eventi registrati'+(all.length>visible.length?' · visualizzati gli ultimi '+visible.length:'')+'</span><button class="secondary" id="sa-refresh-logs" type="button">Aggiorna</button></div>' +
+    (visible.length
+      ? '<div class="audit-log-table-wrap"><table class="data-table audit-log-table"><thead><tr><th>Data e ora</th><th>Operatore Windows</th><th>Azione</th><th>Oggetto</th><th>Esito</th><th>Errore</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      : '<div class="choice-panel">Nessun evento di audit presente.</div>');
+  const root = showModal('Log di audit', 'Consultazione in sola lettura · file JSONL locali', body, '<button class="primary" data-modal-cancel>Chiudi</button>');
+  root.querySelector('#sa-refresh-logs')?.addEventListener('click', () => send('readLogs'));
+}
 function handleMessage(event) {
   const result = event.data;
   if (!result || !result.operation) return;
+  if (result.operation === 'readLogs') {
+    if (result.success && Array.isArray(result.data)) showAuditLogs(result.data);
+    else showResultModal('Impossibile leggere i log', 'Il file di audit non è disponibile.', '<div class="modal-error">'+escapeHtml(result.error || 'Errore di lettura non specificato')+'</div>');
+    return;
+  }
   if (result.operation === 'status') {
     if (result.success && result.data) {
       state.status = result.data;
@@ -1068,6 +1088,10 @@ document.querySelectorAll('.nav-item').forEach(button => button.addEventListener
   if (state.page === 'overview') send('dashboard');
   else if (pageConfig[state.page]) requestPage(state.page, state.queries[state.page] || '');
 }));
+document.querySelector('#open-logs')?.addEventListener('click', () => send('readLogs'));
+document.querySelector('#clear-logs')?.addEventListener('click', () => {
+  showModal('Svuota log', 'Funzionalità non ancora disponibile.', '<div class="choice-panel">Option not yet implemented</div>', '<button class="primary" data-modal-cancel>Chiudi</button>');
+});
 if (hasBridge) {
   window.chrome.webview.addEventListener('message', handleMessage);
   send('status');
