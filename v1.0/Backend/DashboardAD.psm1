@@ -82,7 +82,7 @@ function Get-DashboardADOUs {
 
 function New-DashboardADOU {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Name,[string]$Path='',[string]$Description='')
+    param([Parameter(Mandatory)][string]$Name,[string]$Path='',[string]$Description='',[bool]$ProtectedFromAccidentalDeletion=$true)
     Import-Module ActiveDirectory -ErrorAction Stop
     $nameValue=$Name.Trim()
     if ([string]::IsNullOrWhiteSpace($nameValue) -or $nameValue.Length -gt 64 -or $nameValue -match '[,+"\\<>;=]') { throw 'Nome OU non valido (massimo 64 caratteri; evitare , + " \ < > ; =).' }
@@ -90,8 +90,8 @@ function New-DashboardADOU {
     else { $parent=(Get-ADOrganizationalUnit -Identity $Path -ErrorAction Stop).DistinguishedName }
     $escaped=$nameValue.Replace("'","''")
     if (Get-ADOrganizationalUnit -SearchBase $parent -SearchScope OneLevel -Filter "Name -eq '$escaped'" -ErrorAction Stop) { throw "Esiste già una OU chiamata '$nameValue' in questa posizione." }
-    $created=New-ADOrganizationalUnit -Name $nameValue -Path $parent -Description $Description -PassThru -ErrorAction Stop
-    [pscustomobject]@{message="OU '$nameValue' creata.";ou=$created.DistinguishedName}
+    $created=New-ADOrganizationalUnit -Name $nameValue -Path $parent -Description $Description -ProtectedFromAccidentalDeletion:$ProtectedFromAccidentalDeletion -PassThru -ErrorAction Stop
+    [pscustomobject]@{message="OU '$nameValue' creata con protezione dall'eliminazione accidentale $([string]$ProtectedFromAccidentalDeletion.ToString().ToLowerInvariant()).";ou=$created.DistinguishedName;protectedFromAccidentalDeletion=$ProtectedFromAccidentalDeletion}
 }
 function Update-DashboardADOU {
     [CmdletBinding()]
@@ -588,7 +588,8 @@ function Invoke-DashboardADRequest {
         [string]$GroupName = '',
         [string]$GroupCategory = 'Security',
         [string]$GroupScope = 'Global',
-        [string[]]$Members = @()
+        [string[]]$Members = @(),
+        [bool]$ProtectedFromAccidentalDeletion = $true
     )
     try {
         $data = switch ($Operation) {
@@ -610,7 +611,7 @@ function Invoke-DashboardADRequest {
             'deleteGroup' { Remove-DashboardADGroup -Identity $Identity }
             'groups' { Get-DashboardADGroups -Query $Query }
             'ouContents' { Get-DashboardADOUContents -Identity $Identity }
-            'createOU' { New-DashboardADOU -Name $GroupName -Path $Path -Description $Description }
+            'createOU' { New-DashboardADOU -Name $GroupName -Path $Path -Description $Description -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion }
             'updateOU' { Update-DashboardADOU -Identity $Identity -Name $GroupName -Description $Description }
             'deleteOU' { Remove-DashboardADOU -Identity $Identity }
             'ous' { Get-DashboardADOUs -Query $Query }
