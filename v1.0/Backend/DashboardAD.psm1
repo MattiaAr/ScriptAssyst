@@ -265,7 +265,12 @@ function Update-DashboardADGroup {
     param([Parameter(Mandatory)][string]$Identity,[Parameter(Mandatory)][string]$GroupName,[string]$Description='')
     Import-Module ActiveDirectory -ErrorAction Stop;$g=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
     if(Test-DashboardADDefaultGroup $g){throw 'I gruppi predefiniti non possono essere modificati da questa schermata.'}
-    Set-ADGroup -Identity $g.DistinguishedName -SamAccountName $GroupName -Description $Description -ErrorAction Stop
+    $name=$GroupName.Trim()
+    if([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 256 -or $name -match '[\\/\[\]:;|=,+*?<>"\\]'){throw 'Nome gruppo non valido (massimo 256 caratteri; contiene caratteri non consentiti).'}
+    $escaped=$name.Replace("'","''")
+    $duplicates=@(Get-ADGroup -Filter "Name -eq '$escaped' -or SamAccountName -eq '$escaped'" -ErrorAction Stop | Where-Object {$_.DistinguishedName -ine $g.DistinguishedName})
+    if($duplicates.Count){throw "Esiste già un gruppo con nome o account '$name'."}
+    Set-ADGroup -Identity $g.DistinguishedName -SamAccountName $name -Description $Description -ErrorAction Stop
     Rename-ADObject -Identity $g.DistinguishedName -NewName $GroupName -ErrorAction Stop
     [pscustomobject]@{message="Gruppo aggiornato: '$GroupName'."}
 }
@@ -458,7 +463,15 @@ function Update-DashboardADUserGroups {
     $desired = @{}
     foreach ($entry in @($Groups)) {
         if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
-        $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop
+        $group = $null
+        try { $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop }
+        catch {
+            $escapedGroup = ([string]$entry).Replace("'", "''")
+            $matches = @(Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop)
+            if ($matches.Count -gt 1) { throw "Il gruppo '$entry' non è univoco. Specifica il Distinguished Name completo." }
+            if (-not $matches.Count) { throw "Gruppo non trovato: '$entry'." }
+            $group = $matches[0]
+        }
         $sidText = [string]$group.SID.Value
         $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
             $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
