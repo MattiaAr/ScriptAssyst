@@ -39,7 +39,7 @@ jobs:
           $files = @(
             ".\v1.0\Backend\Start-DashboardAD.ps1",
             ".\v1.0\Backend\DashboardAD.psm1",
-            ".\v1.0\Setup\Initialize-DashboardADCredentials.ps1"
+            ".\v1.0\Setup\Credential-Setup.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -58,7 +58,7 @@ jobs:
         run: dotnet build .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release -r win-x64 --no-restore
 
       - name: Publish x64 candidate
-        run: dotnet publish .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\artifacts\DashboardAD-win-x64 --no-restore
+        run: dotnet publish .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\artifacts\DashboardAD-win-x64 --no-restore
 
       - name: Upload candidate
         uses: actions/upload-artifact@v4
