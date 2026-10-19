@@ -407,6 +407,32 @@ function New-DashboardADUser {
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 128) { throw 'Nome account non valido.' }
     if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Selezionare una OU valida.' }
     if ([string]::IsNullOrEmpty($Password)) { throw 'La password iniziale è obbligatoria.' }
+
+    # Validate the default domain policy before creating any directory object.
+    $passwordPolicy = Get-ADDefaultDomainPasswordPolicy -ErrorAction Stop
+    if ($Password.Length -lt [int]$passwordPolicy.MinPasswordLength) {
+        throw "Password non conforme: la policy del dominio richiede almeno $($passwordPolicy.MinPasswordLength) caratteri. L'utente non è stato creato."
+    }
+    if ($passwordPolicy.ComplexityEnabled) {
+        $categories = 0
+        if ($Password -cmatch '[A-Z]') { $categories++ }
+        if ($Password -cmatch '[a-z]') { $categories++ }
+        if ($Password -match '[0-9]') { $categories++ }
+        if ($Password -match '[^a-zA-Z0-9]') { $categories++ }
+        if ($categories -lt 3) {
+            throw "Password non conforme: la policy del dominio richiede almeno 3 categorie tra maiuscole, minuscole, numeri e simboli. L'utente non è stato creato."
+        }
+    }
+    if ($Password.IndexOf($Identity, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Password non conforme: non può contenere il nome account. L'utente non è stato creato."
+    }
+    $nameParts = @("$GivenName $Surname $DisplayName" -split '[^\p{L}\p{Nd}]+' | Where-Object { $_.Length -ge 3 } | Select-Object -Unique)
+    foreach ($part in $nameParts) {
+        if ($Password.IndexOf($part, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            throw "Password non conforme: non può contenere parti del nome o cognome. L'utente non è stato creato."
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
         $upnSuffix = [string]$global:DashboardADConfig.ActiveDirectory.UPNSuffix
         if ([string]::IsNullOrWhiteSpace($upnSuffix)) {
@@ -419,16 +445,15 @@ function New-DashboardADUser {
     $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
     $escapedIdentity = $Identity.Replace("'", "''")
     if (Get-ADUser -Filter "SamAccountName -eq '$escapedIdentity'" -ErrorAction Stop) { throw "Esiste già un account con nome '$Identity'." }
-    $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+
     $accountName = if ($DisplayName) { $DisplayName } else { (($GivenName + ' ' + $Surname).Trim()) }
     if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = $Identity }
     $params = @{
         Name = $accountName
         SamAccountName = $Identity
         Path = $ou.DistinguishedName
-        AccountPassword = $securePassword
-        Enabled = $true
-        ChangePasswordAtLogon = $ChangePasswordAtLogon
+        Enabled = $false
+        PassThru = $true
         ErrorAction = 'Stop'
     }
     if ($GivenName) { $params.GivenName = $GivenName }
@@ -439,8 +464,24 @@ function New-DashboardADUser {
     if ($Title) { $params.Title = $Title }
     if ($Email) { $params.EmailAddress = $Email }
     if ($Description) { $params.Description = $Description }
-    New-ADUser @params
-    $created = Get-ADUser -Identity $Identity -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
+
+    $created = New-ADUser @params
+    try {
+        $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        Set-ADAccountPassword -Identity $created.DistinguishedName -Reset -NewPassword $securePassword -ErrorAction Stop
+        Set-ADUser -Identity $created.DistinguishedName -ChangePasswordAtLogon $ChangePasswordAtLogon -ErrorAction Stop
+        Enable-ADAccount -Identity $created.DistinguishedName -ErrorAction Stop
+    } catch {
+        $passwordError = $_.Exception.Message
+        try {
+            Remove-ADUser -Identity $created.DistinguishedName -Confirm:$false -ErrorAction Stop
+        } catch {
+            throw "Active Directory ha rifiutato la password e non è stato possibile rimuovere automaticamente l'account rimasto disabilitato. Errore password: $passwordError. Errore rimozione: $($_.Exception.Message)"
+        }
+        throw "Active Directory ha rifiutato la password (ad esempio per cronologia o policy specifiche). L'account temporaneo è stato rimosso e l'utente non è stato creato. Dettaglio: $passwordError"
+    }
+
+    $created = Get-ADUser -Identity $created.DistinguishedName -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
     $added = [System.Collections.Generic.List[string]]::new()
     $groupWarnings = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in @($Groups)) {
@@ -465,7 +506,7 @@ function New-DashboardADUser {
             $groupWarnings.Add("$($groupIdentity): $($_.Exception.Message)")
         }
     }
-    $message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
+    $message = "Utente '$Identity' creato e abilitato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
     if ($groupWarnings.Count) { $message += " ATTENZIONE: l'account esiste, ma non è stato possibile assegnare alcuni gruppi: " + ($groupWarnings -join '; ') }
     [pscustomobject]@{ message = $message; user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
 }
