@@ -20,6 +20,8 @@ internal sealed class MainForm : Form
 {
     private readonly WebView2 view = new() { Dock = DockStyle.Fill };
     private readonly string root = AppContext.BaseDirectory;
+    private readonly string sessionId = Guid.NewGuid().ToString("N");
+    private bool sessionEndLogged;
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
@@ -34,11 +36,17 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(900, 620);
         Controls.Add(view);
         Load += async (_, _) => await InitializeViewAsync();
+        FormClosing += (_, _) =>
+        {
+            if (sessionEndLogged) return;
+            sessionEndLogged = true;
+            WriteAuditEvent("session_end", sessionId, true, null, null);
+        };
     }
 
     private async Task InitializeViewAsync()
     {
-        WriteAuditEvent("session_start", "", true, null, null);
+        WriteAuditEvent("session_start", sessionId, true, null, null);
         await view.EnsureCoreWebView2Async();
         view.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
         var page = Path.Combine(root, "UI", "index.html");
@@ -95,7 +103,8 @@ internal sealed class MainForm : Form
             var record = new
             {
                 timestamp = DateTimeOffset.UtcNow.ToString("O"),
-                eventType = "session",
+                eventType = action.StartsWith("session_", StringComparison.Ordinal) ? "session" : "application",
+                sessionId,
                 @operator = string.IsNullOrWhiteSpace(Environment.UserDomainName)
                     ? Environment.UserName
                     : Environment.UserDomainName + "\\" + Environment.UserName,
