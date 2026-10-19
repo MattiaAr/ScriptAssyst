@@ -94,16 +94,48 @@ internal sealed class MainForm : Form
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Impossibile avviare PowerShell.");
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
-            await process.StandardInput.WriteAsync(e.WebMessageAsJson);
-            process.StandardInput.Close();
+
+            // PowerShell può terminare prima di leggere la richiesta. In quel caso
+            // WriteAsync genera "The pipe is being closed": attendiamo comunque il
+            // processo per recuperare stderr e il vero errore del backend.
+            IOException? stdinWriteError = null;
+            try
+            {
+                await process.StandardInput.WriteAsync(e.WebMessageAsJson);
+            }
+            catch (IOException ex)
+            {
+                stdinWriteError = ex;
+            }
+            finally
+            {
+                try { process.StandardInput.Close(); }
+                catch (IOException) { }
+            }
+
             await process.WaitForExitAsync();
             var output = await outputTask;
             var error = await errorTask;
+
             if (process.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Backend PowerShell terminato con errore." : error.Trim());
-            view.CoreWebView2.PostWebMessageAsJson(string.IsNullOrWhiteSpace(output)
-                ? JsonSerializer.Serialize(new { success = false, operation, data = (object?)null, error = "Il backend non ha restituito dati." })
-                : output.Trim());
+            {
+                var details = string.IsNullOrWhiteSpace(error)
+                    ? $"Backend PowerShell terminato con codice {process.ExitCode}."
+                    : error.Trim();
+                throw new InvalidOperationException(details);
+            }
+
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                var details = !string.IsNullOrWhiteSpace(error)
+                    ? error.Trim()
+                    : stdinWriteError is not null
+                        ? $"PowerShell ha chiuso lo standard input prima di restituire una risposta: {stdinWriteError.Message}"
+                        : "Il backend non ha restituito dati.";
+                throw new InvalidOperationException(details);
+            }
+
+            view.CoreWebView2.PostWebMessageAsJson(output.Trim());
         }
         catch (Exception ex)
         {
