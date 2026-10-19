@@ -135,7 +135,7 @@ try {
     if ([string]::IsNullOrWhiteSpace([string]$config.ActiveDirectory.PrimaryDC)) { throw 'PrimaryDC non configurato.' }
     if ([string]::IsNullOrWhiteSpace([string]$config.ActiveDirectory.UPNSuffix)) { throw 'UPNSuffix non configurato.' }
     if ([string]::IsNullOrWhiteSpace([string]$config.ActiveDirectory.AdminCredentialPath)) { throw 'AdminCredentialPath non configurato.' }
-    if (-not (Test-Path -LiteralPath $config.ActiveDirectory.AdminCredentialPath -PathType Leaf)) { throw "File credenziali non trovato: $($config.ActiveDirectory.AdminCredentialPath). Esegui Setup\Initialize-DashboardADCredentials.ps1." }
+    if (-not (Test-Path -LiteralPath $config.ActiveDirectory.AdminCredentialPath -PathType Leaf)) { throw "File credenziali non trovato: $($config.ActiveDirectory.AdminCredentialPath). Esegui Setup\Credential-Setup.ps1." }
     $credential = Import-Clixml -LiteralPath $config.ActiveDirectory.AdminCredentialPath -ErrorAction Stop
     if ($credential -isnot [System.Management.Automation.PSCredential]) { throw 'Il file credenziali non contiene un oggetto PSCredential valido.' }
     $expectedUser = [string]$config.ActiveDirectory.ExpectedAdminUsername
