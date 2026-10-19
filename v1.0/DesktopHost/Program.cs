@@ -87,7 +87,7 @@ internal sealed class MainForm : Form
             try
             {
                 using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "DashboardAD.config.json"), Encoding.UTF8));
-                controller = config.RootElement.GetProperty("ActiveDirectory").GetProperty("PrimaryDC").GetString();
+                // La sessione viene registrata prima della connessione AD: non attribuire un controller non ancora verificato.
                 adminAccount ??= config.RootElement.GetProperty("ActiveDirectory").GetProperty("ExpectedAdminUsername").GetString();
             }
             catch { }
