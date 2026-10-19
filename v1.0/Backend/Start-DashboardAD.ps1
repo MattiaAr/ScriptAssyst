@@ -91,14 +91,14 @@ function Write-DashboardADLog {
         $line = [ordered]@{
             timestamp = [DateTimeOffset]::UtcNow.ToString('o')
             eventType = $EventType
-            operator = if ($env:USERDOMAIN) { "$($env:USERDOMAIN)\$($env:USERNAME)" } else { [string]$env:USERNAME }
+            operator = $(if ($env:USERDOMAIN) { "$($env:USERDOMAIN)\$($env:USERNAME)" } else { [string]$env:USERNAME })
             adminAccount = $AdminAccount
             sourceComputer = [string]$env:COMPUTERNAME
             domainController = $Controller
             action = $Action
             target = $Target
             success = $Success
-            error = if ($Success -or [string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage }
+            error = $(if ($Success -or [string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage })
             ticket = $null
         } | ConvertTo-Json -Compress -Depth 5
         $bytes = [System.Text.Encoding]::UTF8.GetByteCount($line + [Environment]::NewLine)
