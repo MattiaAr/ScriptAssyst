@@ -65,14 +65,57 @@ $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'DashboardAD.config.j
 $selectedDC = $null
 $config = $null
 $credential = $null
+$script:DashboardADMutationOperations = @(
+    'createOU','updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword',
+    'deleteUser','updateUserGroups','createUser','updateUser','copyUser','updateGroupMembers',
+    'createGroup','updateGroup','deleteGroup'
+)
 function Write-DashboardADLog {
-    param([string]$Message)
+    param(
+        [Parameter(Mandatory)][string]$Action,
+        [string]$Target = '',
+        [bool]$Success = $true,
+        [string]$ErrorMessage = '',
+        [string]$Controller = '',
+        [string]$AdminAccount = '',
+        [string]$EventType = 'ad_operation'
+    )
     try {
-        $logPath = [string]$config.Logging.Path
+        $logPath = [Environment]::ExpandEnvironmentVariables([string]$config.Logging.Path)
         if ([string]::IsNullOrWhiteSpace($logPath)) { return }
         $directory = Split-Path -Parent $logPath
         if ($directory -and -not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
-        Add-Content -LiteralPath $logPath -Value ("{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message) -Encoding UTF8
+        $maxMb = 2
+        if ($null -ne $config.Logging.MaxLogSizeMB -and [int]$config.Logging.MaxLogSizeMB -gt 0) { $maxMb = [int]$config.Logging.MaxLogSizeMB }
+        $maxBytes = [long]$maxMb * 1MB
+        $line = [ordered]@{
+            timestamp = [DateTimeOffset]::UtcNow.ToString('o')
+            eventType = $EventType
+            operator = if ($env:USERDOMAIN) { "$($env:USERDOMAIN)\$($env:USERNAME)" } else { [string]$env:USERNAME }
+            adminAccount = $AdminAccount
+            sourceComputer = [string]$env:COMPUTERNAME
+            domainController = $Controller
+            action = $Action
+            target = $Target
+            success = $Success
+            error = if ($Success -or [string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage }
+            ticket = $null
+        } | ConvertTo-Json -Compress -Depth 5
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($line + [Environment]::NewLine)
+        if ((Test-Path -LiteralPath $logPath -PathType Leaf) -and ((Get-Item -LiteralPath $logPath).Length + $bytes -gt $maxBytes)) {
+            $parent = Split-Path -Parent $logPath
+            $stem = [IO.Path]::GetFileNameWithoutExtension($logPath)
+            $ext = [IO.Path]::GetExtension($logPath)
+            $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+            $rotated = Join-Path $parent "$stem-$stamp$ext"
+            $suffix = 1
+            while (Test-Path -LiteralPath $rotated) {
+                $rotated = Join-Path $parent "$stem-$stamp-$suffix$ext"
+                $suffix++
+            }
+            Move-Item -LiteralPath $logPath -Destination $rotated
+        }
+        Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
     } catch { }
 }
 function Test-DashboardADTcpPort {
@@ -120,13 +163,27 @@ try {
     $global:DashboardADSelectedDC = $selectedDC
     $global:PSDefaultParameterValues['*-AD*:Server'] = $selectedDC
     $global:PSDefaultParameterValues['*-AD*:Credential'] = $credential
-    Write-DashboardADLog "INFO operation=$Operation dc=$selectedDC account=$($credential.UserName)"
     Import-Module (Join-Path $PSScriptRoot 'DashboardAD.psm1') -Force
     $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
-    Write-DashboardADLog ("{0} operation={1} dc={2}{3}" -f $(if ($result.success) {'INFO'} else {'ERROR'}), $Operation, $selectedDC, $(if ($result.error) {" error=$($result.error)"} else {''}))
+    if ($Operation -in $script:DashboardADMutationOperations) {
+        $target = switch ($Operation) {
+            { $_ -in @('createOU','createGroup') } { if ($GroupName) { $GroupName } else { $Path }; break }
+            { $_ -in @('updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword','deleteUser','updateUser','updateUserGroups','updateGroup','updateGroupMembers') } { $Identity; break }
+            { $_ -in @('createUser','copyUser') } { if ($Identity) { $Identity } elseif ($UserPrincipalName) { $UserPrincipalName } else { $DisplayName }; break }
+            default { if ($GroupName) { $GroupName } else { $Identity } }
+        }
+        $safeError = [string]$result.error
+        if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
+        Write-DashboardADLog -Action $Operation -Target $target -Success ([bool]$result.success) -ErrorMessage $safeError -Controller $selectedDC -AdminAccount $credential.UserName
+    }
     $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
-    Write-DashboardADLog "ERROR operation=$Operation error=$($_.Exception.Message)"
+    if ($Operation -in $script:DashboardADMutationOperations) {
+        $target = if ($Identity) { $Identity } elseif ($GroupName) { $GroupName } elseif ($UserPrincipalName) { $UserPrincipalName } else { $DisplayName }
+        $safeError = [string]$_.Exception.Message
+        if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
+        Write-DashboardADLog -Action $Operation -Target $target -Success $false -ErrorMessage $safeError -Controller ([string]$selectedDC) -AdminAccount $(if ($credential) { $credential.UserName } else { '' })
+    }
     [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message } | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $Password = $null
