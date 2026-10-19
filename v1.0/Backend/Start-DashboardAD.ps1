@@ -115,7 +115,7 @@ function Write-DashboardADLog {
             }
             Move-Item -LiteralPath $logPath -Destination $rotated
         }
-        Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+        [System.IO.File]::AppendAllText($logPath, $line + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     } catch { }
 }
 function Test-DashboardADTcpPort {
