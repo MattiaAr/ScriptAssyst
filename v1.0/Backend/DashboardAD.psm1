@@ -368,8 +368,427 @@ function Set-DashboardADUser {
     )){
         if([string]::IsNullOrWhiteSpace([string]$field.Value)){$clear.Add([string]$field.Attribute)}else{$set[[string]$field.Key]=[string]$field.Value}
     }
-    if(-not [string]::IsNullOrWhiteSpace($UserPrincipalName)){
-        if($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+
+    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+
+        [Parameter(Mandatory)][string]$Password,
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string[]]$Groups = @(),
+        [bool]$ChangePasswordAtLogon = $true
+    )
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 128) { throw 'Nome account non valido.' }
+    if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Selezionare una OU valida.' }
+    if ([string]::IsNullOrEmpty($Password)) { throw 'La password iniziale è obbligatoria.' }
+    if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        $upnSuffix = [string]$global:DashboardADConfig.ActiveDirectory.UPNSuffix
+        if ([string]::IsNullOrWhiteSpace($upnSuffix)) {
+            $domain = Get-ADDomain -ErrorAction Stop
+            $upnSuffix = [string]$domain.DNSRoot
+        }
+        $UserPrincipalName = "$Identity@$upnSuffix"
+    }
+    if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+$') { throw 'User Principal Name non valido. Usa il formato nome@dominio.' }
+    $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
+    $escapedIdentity = $Identity.Replace("'", "''")
+    if (Get-ADUser -Filter "SamAccountName -eq '$escapedIdentity'" -ErrorAction Stop) { throw "Esiste già un account con nome '$Identity'." }
+    $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+    $accountName = if ($DisplayName) { $DisplayName } else { (($GivenName + ' ' + $Surname).Trim()) }
+    if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = $Identity }
+    $params = @{
+        Name = $accountName
+        SamAccountName = $Identity
+        Path = $ou.DistinguishedName
+        AccountPassword = $securePassword
+        Enabled = $true
+        ChangePasswordAtLogon = $ChangePasswordAtLogon
+        ErrorAction = 'Stop'
+    }
+    if ($GivenName) { $params.GivenName = $GivenName }
+    if ($Surname) { $params.Surname = $Surname }
+    if ($DisplayName) { $params.DisplayName = $DisplayName }
+    if ($UserPrincipalName) { $params.UserPrincipalName = $UserPrincipalName }
+    if ($Department) { $params.Department = $Department }
+    if ($Title) { $params.Title = $Title }
+    if ($Email) { $params.EmailAddress = $Email }
+    if ($Description) { $params.Description = $Description }
+    New-ADUser @params
+    $created = Get-ADUser -Identity $Identity -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
+    $added = [System.Collections.Generic.List[string]]::new()
+    $groupWarnings = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in @($Groups)) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
+        $groupIdentity = [string]$entry
+        try {
+            try {
+                $group = Get-ADGroup -Identity $groupIdentity -Properties SID,DistinguishedName -ErrorAction Stop
+            } catch {
+                $escapedGroup = $groupIdentity.Replace("'", "''")
+                $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
+                if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
+            }
+            $primaryRid = [string]$created.primaryGroupID
+            if ([string]$group.SID.Value.Split('-')[-1] -eq $primaryRid) { continue }
+            $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
+                Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
+            if ($alreadyMember) { continue }
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
+            $added.Add($group.Name)
+        } catch {
+            $groupWarnings.Add("$($groupIdentity): $($_.Exception.Message)")
+        }
+    }
+    $message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
+    if ($groupWarnings.Count) { $message += " ATTENZIONE: l'account esiste, ma non è stato possibile assegnare alcuni gruppi: " + ($groupWarnings -join '; ') }
+    [pscustomobject]@{ message = $message; user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
+}
+
+function Update-DashboardADUserGroups {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Groups = @())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
+    $user = Get-ADUser -Identity $Identity -Properties memberOf,primaryGroupID,DistinguishedName,SamAccountName -ErrorAction Stop
+    $currentDns = @($user.memberOf | ForEach-Object { [string]$_ })
+    $desired = @{}
+    foreach ($entry in @($Groups)) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
+        $group = $null
+        try { $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop }
+        catch {
+            $escapedGroup = ([string]$entry).Replace("'", "''")
+            $matches = @(Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop)
+            if ($matches.Count -gt 1) { throw "Il gruppo '$entry' non è univoco. Specifica il Distinguished Name completo." }
+            if (-not $matches.Count) { throw "Gruppo non trovato: '$entry'." }
+            $group = $matches[0]
+        }
+        $sidText = [string]$group.SID.Value
+        $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+        if ($protected) {
+            if ($currentDns -contains $group.DistinguishedName) { continue }
+            throw "Il gruppo di sistema '$($group.Name)' non può essere aggiunto da questa schermata."
+        }
+        $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
+    }
+    $added = [System.Collections.Generic.List[string]]::new()
+    $removed = [System.Collections.Generic.List[string]]::new()
+    foreach ($dn in $currentDns) {
+        $group = Get-ADGroup -Identity $dn -Properties SID,DistinguishedName -ErrorAction Stop
+        $sidText = [string]$group.SID.Value
+        $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+        if ($protected -or $desired.ContainsKey($dn.ToLowerInvariant())) { continue }
+        Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $removed.Add($group.Name)
+    }
+    foreach ($key in @($desired.Keys)) {
+        $group = $desired[$key]
+        if ($currentDns -notcontains $group.DistinguishedName) {
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop
+            $added.Add($group.Name)
+        }
+    }
+    [pscustomobject]@{
+        message = "Appartenenze aggiornate per $($user.SamAccountName). Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        added = @($added)
+        removed = @($removed)
+    }
+}
+
+function Invoke-DashboardADRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','deleteUser','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @(),
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string]$Path = '',
+        [string]$GroupName = '',
+        [string]$GroupCategory = 'Security',
+        [string]$GroupScope = 'Global',
+        [string[]]$Members = @()
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-DashboardADStatus }
+            'dashboard' { Get-DashboardADDashboard }
+            'users' { Get-DashboardADUsers -Query $Query }
+            'userDetails' { Get-DashboardADUserDetails -Identity $Identity }
+            'availableGroups' { Get-DashboardADAvailableGroups }
+            'createUser' { New-DashboardADUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'updateUser' { Set-DashboardADUser -Identity $Identity -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups }
+            'copyUser' { New-DashboardADUser -Identity $GroupName -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'updateUserGroups' { Update-DashboardADUserGroups -Identity $Identity -Groups $Groups }
+            'groupMembers' { Get-DashboardADGroupMembers -Identity $Identity }
+            'searchDirectoryMembers' { Search-DashboardADDirectoryMembers -Query $Query }
+            'updateGroupMembers' { Update-DashboardADGroupMembers -Identity $Identity -Members $Members }
+            'createGroup' { New-DashboardADGroup -GroupName $GroupName -Path $Path -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
+            'updateGroup' { Update-DashboardADGroup -Identity $Identity -GroupName $GroupName -Description $Description }
+            'groupDeletePreview' { Get-DashboardADGroupDeletePreview -Identity $Identity }
+            'deleteGroup' { Remove-DashboardADGroup -Identity $Identity }
+            'groups' { Get-DashboardADGroups -Query $Query }
+            'ouContents' { Get-DashboardADOUContents -Identity $Identity }
+            'createOU' { New-DashboardADOU -Name $GroupName -Path $Path -Description $Description }
+            'updateOU' { Update-DashboardADOU -Identity $Identity -Name $GroupName -Description $Description }
+            'deleteOU' { Remove-DashboardADOU -Identity $Identity }
+            'ous' { Get-DashboardADOUs -Query $Query }
+            'gpos' { Get-DashboardADGpos -Query $Query }
+            'tasks' { Get-DashboardADScheduledTasks -Query $Query }
+            'disableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'moveUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'deleteUser' { Remove-DashboardADUser -Identity $Identity }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; query=$Query; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-DashboardADStatus, Invoke-DashboardADRequest
+){throw 'User Principal Name non valido. Usa il formato nome@dominio.'}
+        $set.UserPrincipalName=$UserPrincipalName
+    }
+    if($clear.Count){$set['Clear']=@($clear)}
+    Set-ADUser @set
+    $groupResult=Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
+    $updated=Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,Enabled,Mail,Description,DistinguishedName -ErrorAction Stop |
+        Select-Object Name,SamAccountName,GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,Enabled,Mail,Description,DistinguishedName
+    [pscustomobject]@{message="Utente '$($user.SamAccountName)' aggiornato. $($groupResult.message)";user=$updated;groups=$groupResult}
+}
+
+function New-DashboardADUser {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Identity,
+        [Parameter(Mandatory)][string]$DestinationOU,
+        [Parameter(Mandatory)][string]$Password,
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string[]]$Groups = @(),
+        [bool]$ChangePasswordAtLogon = $true
+    )
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 128) { throw 'Nome account non valido.' }
+    if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Selezionare una OU valida.' }
+    if ([string]::IsNullOrEmpty($Password)) { throw 'La password iniziale è obbligatoria.' }
+    if ([string]::IsNullOrWhiteSpace($UserPrincipalName)) {
+        $upnSuffix = [string]$global:DashboardADConfig.ActiveDirectory.UPNSuffix
+        if ([string]::IsNullOrWhiteSpace($upnSuffix)) {
+            $domain = Get-ADDomain -ErrorAction Stop
+            $upnSuffix = [string]$domain.DNSRoot
+        }
+        $UserPrincipalName = "$Identity@$upnSuffix"
+    }
+    if ($UserPrincipalName -notmatch '^[^@\s]+@[^@\s]+$') { throw 'User Principal Name non valido. Usa il formato nome@dominio.' }
+    $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
+    $escapedIdentity = $Identity.Replace("'", "''")
+    if (Get-ADUser -Filter "SamAccountName -eq '$escapedIdentity'" -ErrorAction Stop) { throw "Esiste già un account con nome '$Identity'." }
+    $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+    $accountName = if ($DisplayName) { $DisplayName } else { (($GivenName + ' ' + $Surname).Trim()) }
+    if ([string]::IsNullOrWhiteSpace($accountName)) { $accountName = $Identity }
+    $params = @{
+        Name = $accountName
+        SamAccountName = $Identity
+        Path = $ou.DistinguishedName
+        AccountPassword = $securePassword
+        Enabled = $true
+        ChangePasswordAtLogon = $ChangePasswordAtLogon
+        ErrorAction = 'Stop'
+    }
+    if ($GivenName) { $params.GivenName = $GivenName }
+    if ($Surname) { $params.Surname = $Surname }
+    if ($DisplayName) { $params.DisplayName = $DisplayName }
+    if ($UserPrincipalName) { $params.UserPrincipalName = $UserPrincipalName }
+    if ($Department) { $params.Department = $Department }
+    if ($Title) { $params.Title = $Title }
+    if ($Email) { $params.EmailAddress = $Email }
+    if ($Description) { $params.Description = $Description }
+    New-ADUser @params
+    $created = Get-ADUser -Identity $Identity -Properties DistinguishedName,primaryGroupID -ErrorAction Stop
+    $added = [System.Collections.Generic.List[string]]::new()
+    $groupWarnings = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in @($Groups)) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
+        $groupIdentity = [string]$entry
+        try {
+            try {
+                $group = Get-ADGroup -Identity $groupIdentity -Properties SID,DistinguishedName -ErrorAction Stop
+            } catch {
+                $escapedGroup = $groupIdentity.Replace("'", "''")
+                $group = Get-ADGroup -Filter "Name -eq '$escapedGroup' -or SamAccountName -eq '$escapedGroup'" -Properties SID,DistinguishedName -ErrorAction Stop | Select-Object -First 1
+                if (-not $group) { throw "Gruppo non trovato: '$groupIdentity'." }
+            }
+            $primaryRid = [string]$created.primaryGroupID
+            if ([string]$group.SID.Value.Split('-')[-1] -eq $primaryRid) { continue }
+            $alreadyMember = Get-ADGroupMember -Identity $group.DistinguishedName -Recursive:$false -ErrorAction Stop |
+                Where-Object { $_.DistinguishedName -eq $created.DistinguishedName }
+            if ($alreadyMember) { continue }
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $created.DistinguishedName -ErrorAction Stop
+            $added.Add($group.Name)
+        } catch {
+            $groupWarnings.Add("$($groupIdentity): $($_.Exception.Message)")
+        }
+    }
+    $message = "Utente '$Identity' creato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
+    if ($groupWarnings.Count) { $message += " ATTENZIONE: l'account esiste, ma non è stato possibile assegnare alcuni gruppi: " + ($groupWarnings -join '; ') }
+    [pscustomobject]@{ message = $message; user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
+}
+
+function Update-DashboardADUserGroups {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity,[string[]]$Groups = @())
+    Import-Module ActiveDirectory -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
+    $user = Get-ADUser -Identity $Identity -Properties memberOf,primaryGroupID,DistinguishedName,SamAccountName -ErrorAction Stop
+    $currentDns = @($user.memberOf | ForEach-Object { [string]$_ })
+    $desired = @{}
+    foreach ($entry in @($Groups)) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry)) { continue }
+        $group = Get-ADGroup -Identity ([string]$entry) -Properties SID,DistinguishedName -ErrorAction Stop
+        $sidText = [string]$group.SID.Value
+        $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+        if ($protected) { throw "Il gruppo di sistema '$($group.Name)' non può essere modificato da questa schermata." }
+        $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
+    }
+    $added = [System.Collections.Generic.List[string]]::new()
+    $removed = [System.Collections.Generic.List[string]]::new()
+    foreach ($dn in $currentDns) {
+        $group = Get-ADGroup -Identity $dn -Properties SID,DistinguishedName -ErrorAction Stop
+        $sidText = [string]$group.SID.Value
+        $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+        if ($protected -or $desired.ContainsKey($dn.ToLowerInvariant())) { continue }
+        Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
+        $removed.Add($group.Name)
+    }
+    foreach ($key in @($desired.Keys)) {
+        $group = $desired[$key]
+        if ($currentDns -notcontains $group.DistinguishedName) {
+            Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop
+            $added.Add($group.Name)
+        }
+    }
+    [pscustomobject]@{
+        message = "Appartenenze aggiornate per $($user.SamAccountName). Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        added = @($added)
+        removed = @($removed)
+    }
+}
+
+function Invoke-DashboardADRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','deleteUser','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @(),
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string]$Path = '',
+        [string]$GroupName = '',
+        [string]$GroupCategory = 'Security',
+        [string]$GroupScope = 'Global',
+        [string[]]$Members = @()
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-DashboardADStatus }
+            'dashboard' { Get-DashboardADDashboard }
+            'users' { Get-DashboardADUsers -Query $Query }
+            'userDetails' { Get-DashboardADUserDetails -Identity $Identity }
+            'availableGroups' { Get-DashboardADAvailableGroups }
+            'createUser' { New-DashboardADUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'updateUserGroups' { Update-DashboardADUserGroups -Identity $Identity -Groups $Groups }
+            'groupMembers' { Get-DashboardADGroupMembers -Identity $Identity }
+            'searchDirectoryMembers' { Search-DashboardADDirectoryMembers -Query $Query }
+            'updateGroupMembers' { Update-DashboardADGroupMembers -Identity $Identity -Members $Members }
+            'createGroup' { New-DashboardADGroup -GroupName $GroupName -Path $Path -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
+            'updateGroup' { Update-DashboardADGroup -Identity $Identity -GroupName $GroupName -Description $Description }
+            'groupDeletePreview' { Get-DashboardADGroupDeletePreview -Identity $Identity }
+            'deleteGroup' { Remove-DashboardADGroup -Identity $Identity }
+            'groups' { Get-DashboardADGroups -Query $Query }
+            'ouContents' { Get-DashboardADOUContents -Identity $Identity }
+            'createOU' { New-DashboardADOU -Name $GroupName -Path $Path -Description $Description }
+            'updateOU' { Update-DashboardADOU -Identity $Identity -Name $GroupName -Description $Description }
+            'deleteOU' { Remove-DashboardADOU -Identity $Identity }
+            'ous' { Get-DashboardADOUs -Query $Query }
+            'gpos' { Get-DashboardADGpos -Query $Query }
+            'tasks' { Get-DashboardADScheduledTasks -Query $Query }
+            'disableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'moveUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'deleteUser' { Remove-DashboardADUser -Identity $Identity }
+        }
+        [pscustomobject]@{ success=$true; operation=$Operation; query=$Query; data=$data; error=$null }
+    } catch {
+        [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-DashboardADStatus, Invoke-DashboardADRequest
+) {
+            throw 'User Principal Name non valido. Usa il formato nome@dominio.'
+        }
+        $set.UserPrincipalName = $UserPrincipalName
+    }
+
+    Set-ADUser @set
+    if ($clear.Count -gt 0) {
+        Set-ADUser -Identity $user.DistinguishedName -Clear $clear.ToArray() -ErrorAction Stop
+    }
+    if (@($Groups).Count -gt 0) {
+        Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
+    }
+
+    Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
+}
+
+function New-DashboardADUser {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Identity,
