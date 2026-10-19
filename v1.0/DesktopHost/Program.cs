@@ -134,26 +134,30 @@ internal sealed class MainForm : Form
         var directory = Path.GetDirectoryName(logPath) ?? root;
         var stem = Path.GetFileNameWithoutExtension(logPath);
         var extension = Path.GetExtension(logPath);
-        var files = Directory.Exists(directory)
-            ? Directory.GetFiles(directory, stem + "*" + extension)
-                .OrderBy(File.GetLastWriteTimeUtc)
-                .ToArray()
+        var paths = Directory.Exists(directory)
+            ? Directory.GetFiles(directory, stem + "*" + extension).OrderByDescending(File.GetLastWriteTimeUtc).ToArray()
             : Array.Empty<string>();
-        var records = new List<JsonElement>();
-        foreach (var file in files)
+        var files = new List<object>();
+        foreach (var file in paths)
         {
+            var info = new FileInfo(file);
+            var records = new List<JsonElement>();
             foreach (var line in File.ReadLines(file, Encoding.UTF8))
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
-                try
-                {
-                    using var parsed = JsonDocument.Parse(line);
-                    records.Add(parsed.RootElement.Clone());
-                }
+                try { using var parsed = JsonDocument.Parse(line); records.Add(parsed.RootElement.Clone()); }
                 catch { }
             }
+            files.Add(new {
+                name = info.Name,
+                active = string.Equals(Path.GetFullPath(file), Path.GetFullPath(logPath), StringComparison.OrdinalIgnoreCase),
+                lastWriteUtc = info.LastWriteTimeUtc.ToString("O"),
+                sizeBytes = info.Length,
+                eventCount = records.Count,
+                records
+            });
         }
-        return JsonSerializer.Serialize(new { success = true, operation = "readLogs", data = records, error = (string?)null });
+        return JsonSerializer.Serialize(new { success = true, operation = "readLogs", data = new { activeFile = Path.GetFileName(logPath), files }, error = (string?)null });
     }
 
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
