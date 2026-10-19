@@ -613,7 +613,7 @@ function confirmDeleteGroup(identity){
 function openOUForm(operation, identity='') {
   const existing=(state.data.ous||[]).find(o=>o.DistinguishedName===identity)||null;
   const title=operation==='createOU'?'Crea unità organizzativa':'Modifica unità organizzativa';
-  const body='<label class="modal-label" for="sa-ou-name">Nome OU</label><input class="modal-input" id="sa-ou-name" maxlength="64" required value="'+escapeHtml(existing?.Name||'')+'" placeholder="Es. Utenti"><label class="modal-label" for="sa-ou-description">Descrizione</label><textarea class="modal-input" id="sa-ou-description" rows="3" placeholder="Descrizione facoltativa">'+escapeHtml(existing?.Description||'')+'</textarea>'+(operation==='createOU'?'<label class="modal-label">OU padre</label><p class="modal-hint">Seleziona la radice del dominio oppure una OU esistente.</p><div class="create-ou-tree" id="sa-ou-parent-tree"></div>':'<p class="modal-hint">'+escapeHtml(identity)+'</p>');
+  const body='<label class="modal-label" for="sa-ou-name">Nome OU</label><input class="modal-input" id="sa-ou-name" maxlength="64" required value="'+escapeHtml(existing?.Name||'')+'" placeholder="Es. Utenti"><label class="modal-label" for="sa-ou-description">Descrizione</label><textarea class="modal-input" id="sa-ou-description" rows="3" placeholder="Descrizione facoltativa">'+escapeHtml(existing?.Description||'')+'</textarea>'+(operation==='createOU'?'<label class="modal-label">Protezione OU</label><label class="group-option"><input type="checkbox" id="sa-ou-protected" checked><span><strong>Proteggi da eliminazione accidentale</strong><small>Consigliato. Per eliminare questa OU sarà necessario disattivare la protezione.</small></span></label><label class="modal-label">OU padre</label><p class="modal-hint">Seleziona la radice del dominio oppure una OU esistente.</p><div class="create-ou-tree" id="sa-ou-parent-tree"></div>':'<p class="modal-hint">'+escapeHtml(identity)+'</p>');
   const root=showModal(title,existing?.DistinguishedName||'Nuova OU',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-ou">Salva</button>');
   let selectedParent='';
   if(operation==='createOU'){
@@ -641,8 +641,9 @@ function openOUForm(operation, identity='') {
     if(!name){root.querySelector('#sa-ou-name').focus();return;}
     const description=root.querySelector('#sa-ou-description').value.trim();
     const path=operation==='createOU'?selectedParent:'';
+    const protectedFromAccidentalDeletion=operation==='createOU' ? root.querySelector('#sa-ou-protected')?.checked !== false : undefined;
     closeModal();
-    send(operation,'',{identity,groupName:name,description,path});
+    send(operation,'',{identity,groupName:name,description,path,...(operation==='createOU'?{protectedFromAccidentalDeletion}:{})});
   });
 }
 function confirmDeleteOU(identity) {
@@ -829,7 +830,8 @@ function handleMessage(event) {
     }
     const data=result.data, users=Array.isArray(data.users)?data.users:[];
     const list=users.length?'<div class="group-members-list">'+users.map(u=>'<div class="group-option"><span><strong>'+escapeHtml(u.Name||u.SamAccountName||'Utente')+'</strong><small>'+escapeHtml(u.SamAccountName||'')+'</small><small class="dn-caption">'+escapeHtml(u.DistinguishedName||'')+'</small></span></div>').join('')+'</div>':'<p class="modal-hint">Nessun utente diretto o annidato rilevato nel gruppo.</p>';
-    const body='<div class="choice-panel"><strong>'+escapeHtml(data.name||'Gruppo')+'</strong><div class="group-delete-warning"><span class="group-delete-warning-icon" aria-hidden="true">⚠</span><strong>Eliminando il gruppo, gli utenti elencati perderanno l’appartenenza a questo gruppo.</strong></div><p>L’eliminazione rimuoverà questo gruppo da Active Directory.</p><strong>'+users.length+' '+(users.length===1?'utente coinvolto':'utenti coinvolti')+'</strong></div>'+list+'<p class="modal-hint">Sono inclusi anche gli utenti appartenenti tramite gruppi annidati. L’eliminazione non è reversibile.</p>';
+    const membershipWarning=users.length?'<div class="group-delete-warning"><span class="group-delete-warning-icon" aria-hidden="true">⚠</span><strong>Eliminando il gruppo, gli utenti elencati perderanno l’appartenenza a questo gruppo.</strong></div>':'';
+    const body='<div class="choice-panel"><strong>'+escapeHtml(data.name||'Gruppo')+'</strong>'+membershipWarning+'<p>L’eliminazione rimuoverà questo gruppo da Active Directory.</p><strong>'+users.length+' '+(users.length===1?'utente coinvolto':'utenti coinvolti')+'</strong></div>'+list+'<p class="modal-hint">'+(users.length?'Sono inclusi anche gli utenti appartenenti tramite gruppi annidati. ':'')+'L’eliminazione non è reversibile.</p>';
     const root=showModal('Conferma eliminazione gruppo',data.name||'','<div class="group-delete-impact">'+body+'</div>','<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-delete-group-confirm">Elimina gruppo</button>');
     root.querySelector('#sa-delete-group-confirm').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity:data.identity});});
     return;
@@ -985,7 +987,14 @@ function handleMessage(event) {
         formRoot.querySelector('#sa-save-progress')?.remove();
         delete formRoot.dataset.pendingOperation;
         const oldError=formRoot.querySelector('#sa-form-error'); if(oldError) oldError.remove();
-        formRoot.querySelector('.modal-body')?.insertAdjacentHTML('beforeend','<div id="sa-form-error" class="modal-error">'+escapeHtml(result.error||'Operazione non completata. Correggi i dati e riprova.')+'</div>');
+        const modalBody=formRoot.querySelector('.modal-body');
+        if(modalBody){
+          const message=result.error||'Operazione non completata. Correggi i dati e riprova.';
+          const title=result.operation==='createUser'&&/password|password|compless|lunghezza|history|cronologia/i.test(message)?'Password non conforme alla policy del dominio':'Operazione non completata';
+          modalBody.insertAdjacentHTML('afterbegin','<div id="sa-form-error" class="modal-error" role="alert"><strong>'+escapeHtml(title)+'</strong><p>'+escapeHtml(message)+'</p></div>');
+          modalBody.scrollTop=0;
+          formRoot.querySelector('#sa-form-error')?.focus?.();
+        }
       }
     } else if (result.success) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
