@@ -14,6 +14,7 @@
       <div class="mode-switch" role="group" aria-label="Modalità interfaccia">
         <button class="mode active" data-mode="dashboard">Dashboard</button>
         <button class="mode" data-mode="guided">Guidata</button>
+        <button class="mode" data-mode="logs">LOG</button>
       </div>
       <nav aria-label="Navigazione principale">
         <button class="nav-item active" data-page="overview"><span>▦</span> Panoramica</button>
@@ -26,7 +27,7 @@
       <div class="sidebar-bottom"><span class="status-dot"></span><span id="connection-label">Verifica connessione…</span><small>v1.0 · backend locale</small></div>
     </aside>
     <main class="main">
-      <header class="topbar"><div><div class="eyebrow">GESTIONE DIRECTORY</div><h1 id="page-title">Panoramica</h1></div><div class="top-actions"><span class="environment"><span class="status-dot"></span> Verifica Active Directory…</span><button id="open-logs" class="secondary audit-action" type="button">LOG</button><button id="clear-logs" class="secondary audit-action" type="button">SVUOTA LOG</button><div class="avatar">SA</div></div></header>
+      <header class="topbar"><div><div class="eyebrow">GESTIONE DIRECTORY</div><h1 id="page-title">Panoramica</h1></div><div class="top-actions"><span class="environment"><span class="status-dot"></span> Verifica Active Directory…</span><label class="language-picker" title="Lingua interfaccia"><span aria-hidden="true">文</span><select id="language-select" aria-label="Lingua interfaccia"><option value="it">Italiano</option><option value="en">English</option></select></label><div class="avatar">SA</div></div></header>
       <section id="app-content" class="content" aria-live="polite"></section>
       <footer>Dashboard AD <span>•</span> Gestione AD: le operazioni disponibili richiedono conferma e autorizzazioni di dominio.</footer>
     </main>
