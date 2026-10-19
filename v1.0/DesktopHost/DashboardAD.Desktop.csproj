@@ -5,7 +5,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>DashboardAD.Desktop</AssemblyName>
+    <AssemblyName>DashboardAD</AssemblyName>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en;it</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
     <RootNamespace>DashboardAD.Desktop</RootNamespace>
   </PropertyGroup>
 
@@ -16,21 +21,25 @@
   <ItemGroup>
     <Content Include="../UI/**/*">
       <Link>UI/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
     <Content Include="../Backend/**/*">
       <Link>Backend/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
     <Content Include="../DashboardAD.config.json">
       <Link>DashboardAD.config.json</Link>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
-    <Content Include="../Setup/Initialize-DashboardADCredentials.ps1">
-      <Link>Setup/Initialize-DashboardADCredentials.ps1</Link>
+    <Content Include="../Setup/Credential-Setup.ps1">
+      <Link>Setup/Credential-Setup.ps1</Link>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
