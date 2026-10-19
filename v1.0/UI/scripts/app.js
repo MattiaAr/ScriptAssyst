@@ -12,7 +12,8 @@ const state = {
   selectedUser: null,
   selectedGroup: null,
   selectedOu: null,
-  pendingDeleteOU: null
+  pendingDeleteOU: null,
+  pendingUserForm: null
 };
 
 const pages = {
@@ -502,10 +503,14 @@ function renderCreateUserOuPicker(){
     });
   });
   root.querySelector('#sa-create-ou-confirm').addEventListener('click',()=>{
-    const destination=modalState?.destinationOU;
+    const current=modalState;
+    const destination=current?.destinationOU;
     if(!destination)return;
+    const operation=current.operation||'createUser';
+    const identity=current.identity||'';
+    const detail=current.detail||{path:destination,groups:[]};
     modalState={flow:'createUserForm',destinationOU:destination};
-    openUserForm('createUser','',{path:destination,groups:[]});
+    openUserForm(operation,identity,{...detail,path:destination});
   });
 }
 function formField(id,label,value='',type='text',required=false,description=''){return '<div class="form-field"><label class="modal-label" for="'+id+'">'+label+(required?' *':'')+'</label><input class="modal-input" id="'+id+'" type="'+type+'" value="'+escapeHtml(value||'')+'" '+(required?'required':'')+'>'+(description?'<small class="field-description">'+escapeHtml(description)+'</small>':'')+'</div>';}
@@ -514,8 +519,8 @@ function openUserForm(operation,identity,detail=null){
   const isCopy=operation==='copyUser', isUpdate=operation==='updateUser', isCreate=operation==='createUser';
   const title=isCopy?'Copia utente':isUpdate?'Modifica utente':'Crea utente';
   const source=detail||row;
-  const destination=isCreate?(modalState?.destinationOU||source.path||''):(isCopy?'':(source.DistinguishedName||'').split(',').slice(1).join(','));
-  const body='<div class="choice-panel"><strong>OU di destinazione</strong><p>'+escapeHtml(destination||'Non selezionata')+'</p>'+(isCreate?'<button type="button" class="text-button" id="sa-change-create-ou">Cambia OU</button>':'')+'</div><div class="form-grid">'+formField('sa-given','Nome',source.GivenName,'text',isCreate,'Nome proprio della persona, ad esempio Mario.')+formField('sa-surname','Cognome',source.Surname,'text',isCreate,'Cognome della persona.')+formField('sa-display','Nome visualizzato',source.DisplayName||source.Name,'text',false,'Nome completo mostrato negli elenchi e nelle rubriche.')+formField('sa-account',isCopy?'Nuovo nome account':'Nome account',isCopy?'':source.SamAccountName,'text',!isUpdate,'SamAccountName usato per accedere al dominio, ad esempio mario.rossi.')+formField('sa-upn','User Principal Name',isCopy?'':source.UserPrincipalName,'text',false,'Facoltativo: se lasciato vuoto, DashboardAD lo genera dal nome account e dal dominio.')+formField('sa-department','Reparto',source.Department,'text',false,'Reparto o unità aziendale a cui appartiene l’utente.')+formField('sa-title','Titolo',source.Title,'text',false,'Ruolo o qualifica professionale, ad esempio Tecnico IT.')+formField('sa-email','E-mail',source.Mail||source.Email,'text',false,'Indirizzo e-mail aziendale dell’utente.')+formField('sa-description','Descrizione',source.Description,'text',false,'Nota interna facoltativa per identificare lo scopo o il tipo di account.')+(!isUpdate?formField('sa-new-password','Password iniziale','','password',true,'Password temporanea conforme ai requisiti del dominio. Al primo accesso sarà richiesto il cambio password.'):'')+'</div><h3 class="modal-section-title">Gruppi da assegnare</h3><label class="modal-label" for="sa-manual-groups">Aggiunta manuale gruppi (CN, DN o nome, uno per riga)</label><textarea class="modal-input" id="sa-manual-groups" placeholder="CN=NomeGruppo,OU=Gruppi,DC=homelab,DC=local"></textarea><small class="field-description">Facoltativo: inserisci un gruppo per riga usando il nome, il CN o il Distinguished Name completo. Puoi anche selezionare i gruppi dal browser qui sotto.</small><div id="sa-create-selected-groups" class="group-members-list"><p class="modal-hint">Nessun gruppo selezionato.</p></div><button type="button" class="secondary" id="sa-choose-create-groups">Mostra selezione gruppi</button><div class="group-ou-browser" id="sa-create-group-browser" hidden></div><div class="modal-hint">La password deve rispettare la policy del dominio Active Directory.</div>';
+  const destination=(isCreate||isCopy)?(modalState?.destinationOU||source.path||''):(source.DistinguishedName||'').split(',').slice(1).join(',');
+  const body='<div class="choice-panel"><strong>OU di destinazione</strong><p>'+escapeHtml(destination||'Non selezionata')+'</p>'+((isCreate||isCopy)?'<button type="button" class="text-button" id="sa-change-create-ou">Cambia OU</button>':'')+'</div><div class="form-grid">'+formField('sa-given','Nome',source.GivenName,'text',isCreate,'Nome proprio della persona, ad esempio Mario.')+formField('sa-surname','Cognome',source.Surname,'text',isCreate,'Cognome della persona.')+formField('sa-display','Nome visualizzato',source.DisplayName||source.Name,'text',false,'Nome completo mostrato negli elenchi e nelle rubriche.')+formField('sa-account',isCopy?'Nuovo nome account':'Nome account',isCopy?'':source.SamAccountName,'text',!isUpdate,'SamAccountName usato per accedere al dominio, ad esempio mario.rossi.')+formField('sa-upn','User Principal Name',isCopy?'':source.UserPrincipalName,'text',false,'Facoltativo: se lasciato vuoto, DashboardAD lo genera dal nome account e dal dominio.')+formField('sa-department','Reparto',source.Department,'text',false,'Reparto o unità aziendale a cui appartiene l’utente.')+formField('sa-title','Titolo',source.Title,'text',false,'Ruolo o qualifica professionale, ad esempio Tecnico IT.')+formField('sa-email','E-mail',source.Mail||source.Email,'text',false,'Indirizzo e-mail aziendale dell’utente.')+formField('sa-description','Descrizione',source.Description,'text',false,'Nota interna facoltativa per identificare lo scopo o il tipo di account.')+(!isUpdate?formField('sa-new-password','Password iniziale','','password',true,'Password temporanea conforme ai requisiti del dominio. Al primo accesso sarà richiesto il cambio password.'):'')+'</div><h3 class="modal-section-title">Gruppi da assegnare</h3><label class="modal-label" for="sa-manual-groups">Aggiunta manuale gruppi (CN, DN o nome, uno per riga)</label><textarea class="modal-input" id="sa-manual-groups" placeholder="CN=NomeGruppo,OU=Gruppi,DC=homelab,DC=local"></textarea><small class="field-description">Facoltativo: inserisci un gruppo per riga usando il nome, il CN o il Distinguished Name completo. Puoi anche selezionare i gruppi dal browser qui sotto.</small><div id="sa-create-selected-groups" class="group-members-list"><p class="modal-hint">Nessun gruppo selezionato.</p></div><button type="button" class="secondary" id="sa-choose-create-groups">Mostra selezione gruppi</button><div class="group-ou-browser" id="sa-create-group-browser" hidden></div><div class="modal-hint">La password deve rispettare la policy del dominio Active Directory.</div>';
   const root=showModal(title,isCopy?'Crea un account distinto copiando gli attributi selezionati.':isUpdate?'Aggiorna gli attributi dell’account.':'Completa i dati del nuovo account.',body,'<button class="secondary" data-modal-cancel>Annulla</button><button class="primary" id="sa-save-user">Salva</button>');
   const selectedGroups=new Map((detail?.groups||[]).map(g=>[g.DistinguishedName,g]));
   const drawSelected=()=>{const target=root.querySelector('#sa-create-selected-groups');target.innerHTML=selectedGroups.size?[...selectedGroups.values()].map(g=>'<div class="group-option"><span><strong>'+escapeHtml(g.Name||g.DistinguishedName)+'</strong><small>'+escapeHtml(g.DistinguishedName)+'</small></span><button type="button" class="text-button" data-remove-create-group="'+escapeHtml(g.DistinguishedName)+'">Rimuovi</button></div>').join(''):'<p class="modal-hint">Nessun gruppo selezionato.</p>';target.querySelectorAll('[data-remove-create-group]').forEach(b=>b.addEventListener('click',()=>{selectedGroups.delete(b.dataset.removeCreateGroup);drawSelected();}));};
@@ -526,7 +531,7 @@ function openUserForm(operation,identity,detail=null){
     const domain=String(state.status?.domain||'').trim();
     if(domain && domain.includes('.')) upnInput.value=accountInput.value.trim()+'@'+domain.toLowerCase();
   }});
-  if(isCreate)root.querySelector('#sa-change-create-ou').addEventListener('click',()=>{modalState={flow:'createUserOU',destinationOU:destination};renderCreateUserOuPicker();});
+  if(isCreate||isCopy)root.querySelector('#sa-change-create-ou').addEventListener('click',()=>{modalState={flow:'createUserOU',destinationOU:destination,operation,identity,detail:source};renderCreateUserOuPicker();});
   const groupPicker=root.querySelector('#sa-create-group-browser');
   const groupButton=root.querySelector('#sa-choose-create-groups');
   const renderGroupPicker=()=>{
@@ -553,7 +558,7 @@ function openUserForm(operation,identity,detail=null){
   root.querySelector('#sa-save-user').addEventListener('click',()=>{
     const val=id=>root.querySelector('#'+id)?.value||'';
     if(!isUpdate&&(!val('sa-account').trim()||!destination||!val('sa-new-password'))) { root.querySelector('.modal-body').insertAdjacentHTML('beforeend','<div class="modal-error">Nome account, OU e password iniziale sono obbligatori.</div>');return; }
-    const payload={operation,identity:isUpdate||isCopy?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:destination,department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups:[...new Set([...selectedGroups.keys(),...val('sa-manual-groups').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)])],groupName:val('sa-account').trim(),changePasswordAtLogon:true};
+    const payload={operation,identity:isUpdate?identity:val('sa-account').trim(),givenName:val('sa-given'),surname:val('sa-surname'),displayName:val('sa-display'),userPrincipalName:val('sa-upn'),path:destination,department:val('sa-department'),title:val('sa-title'),email:val('sa-email'),description:val('sa-description'),password:val('sa-new-password'),groups:[...new Set([...selectedGroups.keys(),...val('sa-manual-groups').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)])],groupName:val('sa-account').trim(),changePasswordAtLogon:true};
     root.querySelector('#sa-form-error')?.remove();
     root.querySelectorAll('input,textarea,button').forEach(el=>{if(!el.hasAttribute('data-modal-cancel'))el.disabled=true;});
      root.dataset.pendingOperation=operation;
@@ -700,8 +705,8 @@ function render() {
   }));
   content.querySelectorAll('[data-user-action]').forEach(button => button.addEventListener('click', () => runUserAction(button.dataset.userAction, button.dataset.identity)));
   content.querySelectorAll('[data-inspect-user]').forEach(button => button.addEventListener('click', () => { state.selectedUser=button.dataset.inspectUser; send('userDetails','',{identity:button.dataset.inspectUser}); }));
-  content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => openUserForm('updateUser',button.dataset.editUser)));
-  content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => openUserForm('copyUser',button.dataset.copyUser)));
+  content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => { state.pendingUserForm={operation:'updateUser',identity:button.dataset.editUser}; send('userDetails','',{identity:button.dataset.editUser}); }));
+  content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => { state.pendingUserForm={operation:'copyUser',identity:button.dataset.copyUser}; send('userDetails','',{identity:button.dataset.copyUser}); }));
   content.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', () => confirmDeleteUser(button.dataset.deleteUser)));
   content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', startCreateUserFlow));
   content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', startCreateGroupFlow));
@@ -829,10 +834,16 @@ function handleMessage(event) {
     root.querySelector('#sa-delete-group-confirm').addEventListener('click',()=>{closeModal();send('deleteGroup','',{operation:'deleteGroup',identity:data.identity});});
     return;
   }
+  if (result.operation === 'userDetails' && !result.success && state.pendingUserForm) { state.pendingUserForm=null; showResultModal('Impossibile caricare l’utente','Il modulo non è stato aperto perché non è stato possibile leggere i dati completi.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>'); return; }
   if (['userDetails','groupMembers','ouContents'].includes(result.operation) && !result.success) {
     showResultModal('Impossibile caricare i dettagli','La richiesta al backend non è riuscita.','<div class="modal-error">'+escapeHtml(result.error||'Errore non specificato')+'</div>');
     return;
   }
+  if (result.operation === 'userDetails' && result.success && result.data && state.pendingUserForm) {
+     const pending=state.pendingUserForm; state.pendingUserForm=null;
+     openUserForm(pending.operation,pending.identity,{...(result.data.user||{}),groups:result.data.groups||[]});
+     return;
+   }
   if (result.operation === 'userDetails' && result.success && result.data) {
      const u=result.data.user||{}, groups=result.data.groups||[];
      let available=Array.isArray(result.data.availableGroups)?result.data.availableGroups:[];
