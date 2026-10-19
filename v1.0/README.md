@@ -7,7 +7,7 @@ Applicazione desktop Windows composta da host .NET 8 WinForms/WebView2, interfac
 - DesktopHost/: progetto C# e progetto .NET.
 - UI/: interfaccia locale.
 - Backend/: dispatcher e modulo PowerShell.
-- Setup/Initialize-DashboardADCredentials.ps1: inizializzazione delle credenziali.
+- Setup/Credential-Setup.ps1: inizializzazione delle credenziali.
 - DashboardAD.config.json: configurazione di esempio.
 - Gli script legacy sono in ../legacy e non vengono inclusi nella build.
 
@@ -29,14 +29,14 @@ dotnet build .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release --no-resto
 dotnet run --project .\v1.0\DesktopHost\DashboardAD.Desktop.csproj
 ```
 
-UI, backend, configurazione e script di setup vengono copiati nella directory di output. L'host usa la directory dell'applicazione e non presume una struttura bin/Debug specifica.
+UI, backend, configurazione e script di setup restano come contenuti esterni necessari all'applicazione. L'eseguibile `DashboardAD.exe` incorpora il runtime .NET e le dipendenze gestite per ridurre i file nella cartella principale. La pubblicazione conserva solo le risorse di localizzazione inglese e italiana.
 
 ## Pubblicazione per PC tecnico
 
 Per generare una cartella x64 autonoma rispetto al runtime .NET:
 
 ```powershell
-dotnet publish .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\artifacts\DashboardAD-win-x64
+dotnet publish .\v1.0\DesktopHost\DashboardAD.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\artifacts\DashboardAD-win-x64
 ```
 
 Copiare l'intera cartella artifacts\DashboardAD-win-x64 sul PC di destinazione, non soltanto l'EXE. WebView2 Runtime, Windows PowerShell 5.1 e i moduli RSAT richiesti restano prerequisiti. Per architetture diverse, pubblicare con il runtime appropriato.
@@ -44,11 +44,11 @@ Copiare l'intera cartella artifacts\DashboardAD-win-x64 sul PC di destinazione, 
 ## Credenziali e configurazione
 
 1. Verificare DashboardAD.config.json. I nomi DNS dei DC sono preferiti; gli IP sono fallback opzionali. DNS/Kerberos restano preferibili quando disponibili.
-2. Eseguire Setup\Initialize-DashboardADCredentials.ps1 in PowerShell con lo stesso account Windows che avvierà l'applicazione.
+2. Eseguire Setup\Credential-Setup.ps1 in PowerShell con lo stesso account Windows che avvierà l'applicazione.
 3. Inserire l'account AD dedicato e con privilegi minimi necessari.
 4. Il file CLIXML è protetto dal contesto DPAPI dell'utente Windows e dalla macchina; non copiarlo su altri PC o account.
 
-Il percorso previsto è C:\ProgramData\DashboardAD\admin-credential.xml, esterno al repository. I log sono previsti in C:\ProgramData\DashboardAD\Logs\DashboardAD.log. Proteggere entrambi con ACL appropriate.
+Il percorso previsto è C:\ProgramData\DashboardAD\admin-credential.xml, esterno al repository. I log JSONL sono previsti in `%ProgramData%\DashboardAD\Logs\DashboardAD.jsonl` e vengono mostrati nella sezione LOG. Proteggere entrambi con ACL appropriate.
 
 ## Stato e limiti
 
