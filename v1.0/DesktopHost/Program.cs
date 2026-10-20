@@ -146,21 +146,7 @@ internal sealed class MainForm : Form
                 ticket = (string?)null
             };
             var line = JsonSerializer.Serialize(record);
-            var bytes = Encoding.UTF8.GetByteCount(line + Environment.NewLine);
-            var maxBytes = (long)GetConfiguredMaxLogSizeMb() * 1024 * 1024;
-            var info = new FileInfo(logPath);
-            // Un file per sessione non viene ruotato: avvio, modifiche e chiusura restano insieme.
-            if (sessionLogPath is null && info.Exists && info.Length + bytes > maxBytes)
-            {
-                var stem = Path.GetFileNameWithoutExtension(logPath);
-                var extension = Path.GetExtension(logPath);
-                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
-                var rotatedPath = Path.Combine(directory ?? root, $"{stem}-{stamp}{extension}");
-                var suffix = 1;
-                while (File.Exists(rotatedPath))
-                    rotatedPath = Path.Combine(directory ?? root, $"{stem}-{stamp}-{suffix++}{extension}");
-                File.Move(logPath, rotatedPath);
-            }
+            // Ogni sessione ha il proprio file: non ruotarlo, altrimenti avvio e chiusura si separano.
             File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
         }
         catch { }
