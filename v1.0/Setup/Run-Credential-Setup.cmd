@@ -12,7 +12,7 @@ if errorlevel 1 (
   pause
   exit /b 3
 )
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SCRIPT%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" (
   echo Setup non completato. Codice di uscita: %RESULT%
