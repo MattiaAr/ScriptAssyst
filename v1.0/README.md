@@ -44,7 +44,7 @@ Copiare l'intera cartella artifacts\DashboardAD-win-x64 sul PC di destinazione, 
 ## Credenziali e configurazione
 
 1. Verificare DashboardAD.config.json. I nomi DNS dei DC sono preferiti; gli IP sono fallback opzionali. DNS/Kerberos restano preferibili quando disponibili.
-2. Eseguire Setup\Credential-Setup.ps1 in PowerShell con lo stesso account Windows che avvierà l'applicazione.
+2. Avviare `Setup\Run-Credential-Setup.cmd` con lo stesso account Windows che avvierà l'applicazione. Il launcher avvia PowerShell con un override di execution policy limitato al solo processo; non modifica la policy globale e non richiede di sbloccare manualmente ogni script.
 3. Inserire l'account AD dedicato e con privilegi minimi necessari.
 4. Il file CLIXML è protetto dal contesto DPAPI dell'utente Windows e dalla macchina; non copiarlo su altri PC o account.
 
