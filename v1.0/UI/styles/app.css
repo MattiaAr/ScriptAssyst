@@ -354,5 +354,32 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none !important;
 .log-event-target{margin-top:12px;padding:9px 11px;border-radius:7px;background:#1b2940;color:#bce9e2;font-size:11px;overflow-wrap:anywhere}.log-event-error{margin-top:10px;padding:10px;border:1px solid #5b3440;border-radius:7px;background:#301f2a;color:#ffb9c2;font-size:10px;white-space:pre-wrap;overflow-wrap:anywhere}
 .log-event-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.log-detail{min-width:0;padding:9px;border:1px solid #25334b;border-radius:7px;background:#10192a}.log-detail small{display:block;color:#8190aa;font-size:9px;margin-bottom:5px}.log-detail strong{display:block;color:#dbe4f2;font-size:10px;font-weight:600;overflow-wrap:anywhere;white-space:pre-wrap}
 .log-json{margin-top:12px;border-top:1px solid #293750;padding-top:10px}.log-json summary{color:#82dfd2;font-size:10px;cursor:pointer}.log-json pre{max-height:360px;overflow:auto;padding:12px;border-radius:8px;background:#0b1220;color:#b8c8df;font:10px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.log-session-card{margin:0 0 16px;padding:16px;border:1px solid #2b3952;border-radius:13px;background:linear-gradient(145deg,#141f32,#101827)}
+.log-session-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:2px 0 14px;border-bottom:1px solid #293750}
+.log-session-kicker{display:inline-block;color:#8ee2d6;font-size:9px;font-weight:800;letter-spacing:1.5px}
+.log-session-access h3{margin:5px 0;color:#eef3fb;font:800 16px Manrope}
+.log-session-access p{margin:0;color:#8c9ab2;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
+.log-session-count{flex:none;padding:6px 9px;border:1px solid #2c4655;border-radius:20px;background:#172b3d;color:#b8dcd8;font-size:9px}
+.log-session-account{padding:10px 0;color:#b9c9dc;font-size:10px}
+.log-session-timeline{padding-top:12px}
+.log-operation-row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:0 0 14px}
+.log-operation-time{padding-top:3px;color:#91a2ba;font:600 10px Consolas,monospace}
+.log-operation-main{min-width:0;padding:12px;border:1px solid #293750;border-radius:9px;background:#111b2d}
+.log-operation-title{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.log-operation-title strong{color:#e9eff9;font-size:12px;overflow-wrap:anywhere}
+.log-operation-target{margin-top:8px;padding:8px 9px;border-radius:6px;background:#1b2940;color:#bce9e2;font-size:10px;overflow-wrap:anywhere;word-break:break-word}
+.log-session-meta{margin-top:8px;color:#8293ad;font-size:9px;overflow-wrap:anywhere}
+.log-session-empty{padding:10px 0;color:#8493ac;font-size:11px}
+.log-session-footer{display:flex;align-items:flex-start;gap:10px;padding:12px 0 0;border-top:1px solid #293750}
+.log-session-marker{width:8px;height:8px;flex:none;margin-top:4px;border-radius:50%;background:#75dccc}
+.session-ended .log-session-marker{background:#75dccc}
+.session-open .log-session-marker{background:#f0b76d}
+.log-session-footer>div{flex:1;min-width:0}
+.log-session-footer strong{display:block;color:#dce6f4;font-size:11px}
+.log-session-footer small{display:block;margin-top:4px;color:#8998b0;font-size:9px}
+.log-raw{margin-top:8px;padding-top:7px}
+.log-raw summary{font-size:9px}
+.log-raw pre{max-height:240px}
+@media(max-width:700px){.log-operation-row{grid-template-columns:1fr;gap:5px}.log-operation-time{padding-left:2px}.log-session-header{flex-direction:column}.log-session-count{align-self:flex-start}}
 @media(max-width:1050px){.logs-layout{grid-template-columns:1fr}.logs-file-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.logs-file-panel>.logs-panel-head{grid-column:1/-1}.log-file-card{margin:0}}
 @media(max-width:700px){.logs-heading{align-items:flex-start;flex-direction:column}.logs-file-panel{grid-template-columns:1fr}.log-event-details{grid-template-columns:1fr}.language-picker{padding:5px}.top-actions{gap:8px}}
