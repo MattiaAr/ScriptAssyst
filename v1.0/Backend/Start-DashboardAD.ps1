@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','deleteUser','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
+    [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
     [string]$Operation = 'status',
     [ValidateLength(0,128)]
     [string]$Query = '',
@@ -39,7 +39,10 @@ if ($ReadRequestFromStdin) {
     if ($properties.ContainsKey('destinationOU') -and $null -ne $properties['destinationOU']) { $DestinationOU = [string]$properties['destinationOU'] }
     if ($properties.ContainsKey('password') -and $null -ne $properties['password']) { $Password = [string]$properties['password'] }
     if ($properties.ContainsKey('changePasswordAtLogon') -and $null -ne $properties['changePasswordAtLogon']) { $ChangePasswordAtLogon = [bool]$properties['changePasswordAtLogon'] }
-    if ($properties.ContainsKey('groups') -and $null -ne $properties['groups']) { $Groups = @($properties['groups'] | ForEach-Object { [string]$_ }) }
+    if ($properties.ContainsKey('groups')) {
+        $groupsSpecified = $true
+        $Groups = if ($null -eq $properties['groups']) { @() } else { @($properties['groups'] | ForEach-Object { [string]$_ }) }
+    }
     if ($properties.ContainsKey('givenName') -and $null -ne $properties['givenName']) { $GivenName = [string]$properties['givenName'] }
     if ($properties.ContainsKey('surname') -and $null -ne $properties['surname']) { $Surname = [string]$properties['surname'] }
     if ($properties.ContainsKey('displayName') -and $null -ne $properties['displayName']) { $DisplayName = [string]$properties['displayName'] }
@@ -65,9 +68,10 @@ $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'DashboardAD.config.j
 $selectedDC = $null
 $config = $null
 $credential = $null
+$groupsSpecified = $false
 $script:DashboardADMutationOperations = @(
     'createOU','updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword',
-    'deleteUser','updateUserGroups','createUser','updateUser','copyUser','updateGroupMembers',
+    'updateUserGroups','createUser','updateUser','copyUser','updateGroupMembers',
     'createGroup','updateGroup','deleteGroup'
 )
 function Write-DashboardADLog {
@@ -170,11 +174,11 @@ try {
     $global:PSDefaultParameterValues['*-AD*:Server'] = $selectedDC
     $global:PSDefaultParameterValues['*-AD*:Credential'] = $credential
     Import-Module (Join-Path $PSScriptRoot 'DashboardAD.psm1') -Force
-    $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
+    $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GroupsSpecified $groupsSpecified -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
     if ($Operation -in $script:DashboardADMutationOperations) {
         $target = switch ($Operation) {
             { $_ -in @('createOU','createGroup') } { if ($GroupName) { $GroupName } else { $Path }; break }
-            { $_ -in @('updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword','deleteUser','updateUser','updateUserGroups','updateGroup','updateGroupMembers') } { $Identity; break }
+            { $_ -in @('updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword','updateUser','updateUserGroups','updateGroup','updateGroupMembers') } { $Identity; break }
             { $_ -in @('createUser','copyUser') } { if ($Identity) { $Identity } elseif ($UserPrincipalName) { $UserPrincipalName } else { $DisplayName }; break }
             default { if ($GroupName) { $GroupName } else { $Identity } }
         }

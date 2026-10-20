@@ -312,22 +312,6 @@ function Get-DashboardADAvailableGroups {
     )
 }
 
-function Remove-DashboardADUser {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Identity)
-    Import-Module ActiveDirectory -ErrorAction Stop
-    if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
-    $user = Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName -ErrorAction Stop
-    $sidParts = ([string]$user.SID.Value).Split('-')
-    $rid = -1
-    if ($sidParts.Length -gt 0) { [void][int]::TryParse($sidParts[-1], [ref]$rid) }
-    if ($rid -in @(500,501,502)) { throw 'Non è consentito eliminare gli account amministratore, guest o krbtgt predefiniti.' }
-    $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    if ($current -and ($current.Substring($current.LastIndexOf([char]92) + 1) -ieq $user.SamAccountName)) { throw 'Non è consentito eliminare l’account attualmente in uso.' }
-    Remove-ADUser -Identity $user.DistinguishedName -Confirm:$false -ErrorAction Stop
-    [pscustomobject]@{ message="Utente '$($user.SamAccountName)' eliminato da Active Directory."; identity=$user.DistinguishedName }
-}
-
 function Get-DashboardADUserDetails {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity)
@@ -349,7 +333,7 @@ function Get-DashboardADUserDetails {
 
 function Set-DashboardADUser {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Identity,[string]$GivenName='',[string]$Surname='',[string]$DisplayName='',[string]$UserPrincipalName='',[string]$Department='',[string]$Title='',[string]$Email='',[string]$Description='',[string[]]$Groups=@())
+    param([Parameter(Mandatory)][string]$Identity,[string]$GivenName='',[string]$Surname='',[string]$DisplayName='',[string]$UserPrincipalName='',[string]$Department='',[string]$Title='',[string]$Email='',[string]$Description='',[string[]]$Groups=@(),[bool]$GroupsSpecified=$false)
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
     $user=Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName -ErrorAction Stop
@@ -379,11 +363,15 @@ function Set-DashboardADUser {
     if ($clear.Count -gt 0) {
         Set-ADUser -Identity $user.DistinguishedName -Clear $clear.ToArray() -ErrorAction Stop
     }
-    if (@($Groups).Count -gt 0) {
-        Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
-    }
+    if ($GroupsSpecified) {
+        # Un array esplicitamente vuoto significa rimuovere tutte le appartenenze dirette modificabili.
+        # Le appartenenze protette e il gruppo primario sono esclusi dalla funzione di aggiornamento.
+        $groupChanges = Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
+    } else { $groupChanges = $null }
 
-    Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
+    $updatedUser = Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
+    if ($groupChanges) { $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force }
+    $updatedUser
 }
 
 function New-DashboardADUser {
@@ -568,7 +556,7 @@ function Invoke-DashboardADRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','deleteUser','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
+        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
         [string]$Operation,
         [ValidateLength(0,128)][string]$Query = '',
         [string]$Identity = '',
@@ -599,7 +587,7 @@ function Invoke-DashboardADRequest {
             'userDetails' { Get-DashboardADUserDetails -Identity $Identity }
             'availableGroups' { Get-DashboardADAvailableGroups }
             'createUser' { New-DashboardADUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
-            'updateUser' { Set-DashboardADUser -Identity $Identity -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups }
+            'updateUser' { Set-DashboardADUser -Identity $Identity -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -GroupsSpecified $GroupsSpecified }
             'copyUser' { New-DashboardADUser -Identity $GroupName -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'updateUserGroups' { Update-DashboardADUserGroups -Identity $Identity -Groups $Groups }
             'groupMembers' { Get-DashboardADGroupMembers -Identity $Identity }
@@ -621,7 +609,6 @@ function Invoke-DashboardADRequest {
             'enableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
             'moveUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
             'resetPassword' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
-            'deleteUser' { Remove-DashboardADUser -Identity $Identity }
         }
         [pscustomobject]@{ success=$true; operation=$Operation; query=$Query; data=$data; error=$null }
     } catch {

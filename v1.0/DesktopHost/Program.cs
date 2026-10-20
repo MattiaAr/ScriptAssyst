@@ -27,7 +27,7 @@ internal sealed class MainForm : Form
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
-        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "deleteUser", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups", "readLogs"
+        "status", "dashboard", "users", "groups", "ous", "createOU", "updateOU", "deleteOU", "gpos", "tasks", "disableUser", "enableUser", "moveUser", "resetPassword", "userDetails", "createUser", "updateUser", "copyUser", "createGroup", "deleteGroup", "groupDeletePreview", "updateGroup", "groupMembers", "updateGroupMembers", "searchDirectoryMembers", "updateUserGroups", "ouContents", "availableGroups", "readLogs"
     };
 
     public MainForm()

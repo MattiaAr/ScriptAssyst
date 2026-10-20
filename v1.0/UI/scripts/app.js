@@ -339,7 +339,7 @@ function tablePage(page) {
         const resetAction = row.Enabled === true
           ? '<button class="text-button" data-user-action="resetPassword" data-identity="' + identity + '">Reset password</button>'
           : '<span class="panel-sub">Reset non disponibile</span>';
-        return '<td class="user-actions"><button class="user-action-button" data-edit-user="' + identity + '">Modifica</button><button class="user-action-button" data-copy-user="' + identity + '">Copia</button>' + stateAction.replace('class="text-button"','class="user-action-button"') + '<button class="user-action-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button>' + resetAction.replace('class="text-button"','class="user-action-button"') + '<button class="user-action-button danger-action" data-delete-user="' + identity + '">Elimina</button></td>';
+        return '<td class="user-actions"><button class="user-action-button" data-edit-user="' + identity + '">Modifica</button><button class="user-action-button" data-copy-user="' + identity + '">Copia</button>' + stateAction.replace('class="text-button"','class="user-action-button"') + '<button class="user-action-button" data-user-action="moveUser" data-identity="' + identity + '">Sposta OU</button>' + resetAction.replace('class="text-button"','class="user-action-button"') + '</td>';
       }
       const statusCell = (page === 'users' && key === 'Enabled') ||
         (page === 'tasks' && key === 'State') ||
@@ -672,13 +672,6 @@ function showConfirmDeleteOU(identity, name) {
   root.querySelector('#sa-confirm-delete-ou').addEventListener('click',()=>{closeModal();send('deleteOU','',{identity});});
 }
 
-function confirmDeleteUser(identity) {
-  const user=(state.data.users||[]).find(u=>(u.DistinguishedName||u.SamAccountName)===identity);
-  if(!user)return;
-  const account=user.SamAccountName||user.Name||identity;
-  const root=showModal('Elimina utente', 'Conferma l’eliminazione definitiva dell’account.', '<div class="modal-error"><strong>'+escapeHtml(account)+'</strong><p>L’account verrà eliminato da Active Directory. L’operazione non è reversibile.</p><small>'+escapeHtml(identity)+'</small></div>', '<button class="secondary" data-modal-cancel>Annulla</button><button class="danger" id="sa-delete-user-confirm">Elimina utente</button>');
-  root.querySelector('#sa-delete-user-confirm').addEventListener('click',()=>{closeModal();send('deleteUser','',{operation:'deleteUser',identity});});
-}
 function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
 
 function guided() {
@@ -709,7 +702,7 @@ function auditTime(value, includeDate = false) {
 }
 function auditActionLabel(action) {
  const labels={
-  createUser:['Creazione utente','User created'],copyUser:['Creazione utente da copia','User created from copy'],updateUser:['Modifica utente','User modified'],deleteUser:['Eliminazione utente','User deleted'],disableUser:['Disabilitazione account','Account disabled'],enableUser:['Abilitazione account','Account enabled'],moveUser:['Spostamento utente','User moved'],resetPassword:['Reimpostazione password','Password reset'],updateUserGroups:['Modifica gruppi utente','User group membership changed'],
+  createUser:['Creazione utente','User created'],copyUser:['Creazione utente da copia','User created from copy'],updateUser:['Modifica utente','User modified'],disableUser:['Disabilitazione account','Account disabled'],enableUser:['Abilitazione account','Account enabled'],moveUser:['Spostamento utente','User moved'],resetPassword:['Reimpostazione password','Password reset'],updateUserGroups:['Modifica gruppi utente','User group membership changed'],
   createGroup:['Creazione gruppo','Group created'],updateGroup:['Modifica gruppo','Group modified'],deleteGroup:['Eliminazione gruppo','Group deleted'],updateGroupMembers:['Modifica membri del gruppo','Group membership changed'],createOU:['Creazione unità organizzativa','Organizational unit created'],updateOU:['Modifica unità organizzativa','Organizational unit modified'],deleteOU:['Eliminazione unità organizzativa','Organizational unit deleted'],
   session_start:['Accesso','Session started'],session_end:['Uscita','Session ended']
  };
@@ -793,7 +786,6 @@ function render() {
   content.querySelectorAll('[data-inspect-user]').forEach(button => button.addEventListener('click', () => { state.selectedUser=button.dataset.inspectUser; send('userDetails','',{identity:button.dataset.inspectUser}); }));
   content.querySelectorAll('[data-edit-user]').forEach(button => button.addEventListener('click', () => { state.pendingUserForm={operation:'updateUser',identity:button.dataset.editUser}; send('userDetails','',{identity:button.dataset.editUser}); }));
   content.querySelectorAll('[data-copy-user]').forEach(button => button.addEventListener('click', () => { state.pendingUserForm={operation:'copyUser',identity:button.dataset.copyUser}; send('userDetails','',{identity:button.dataset.copyUser}); }));
-  content.querySelectorAll('[data-delete-user]').forEach(button => button.addEventListener('click', () => confirmDeleteUser(button.dataset.deleteUser)));
   content.querySelectorAll('[data-create-user]').forEach(button => button.addEventListener('click', startCreateUserFlow));
   content.querySelectorAll('[data-create-group]').forEach(button => button.addEventListener('click', startCreateGroupFlow));
   content.querySelectorAll('[data-group-members]').forEach(button => button.addEventListener('click', () => openGroupMembers(button.dataset.groupMembers)));
@@ -1067,8 +1059,8 @@ function handleMessage(event) {
     document.querySelectorAll('[data-open-child-ou]').forEach(button=>button.addEventListener('click',()=>{closeModal();send('ouContents','',{identity:button.dataset.openChildOu});}));
     return;
   }
-  if (['createOU','updateOU','deleteOU','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups','deleteUser'].includes(result.operation)) {
-    const userMutation = ['createUser','updateUser','copyUser','deleteUser'].includes(result.operation);
+  if (['createOU','updateOU','deleteOU','createUser','updateUser','copyUser','createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation)) {
+    const userMutation = ['createUser','updateUser','copyUser'].includes(result.operation);
     const groupMutation = ['createGroup','deleteGroup','updateGroup','updateGroupMembers','updateUserGroups'].includes(result.operation);
     const ouMutation = ['createOU','updateOU','deleteOU'].includes(result.operation);
     if (userMutation && document.querySelector('#sa-modal-root')?.dataset.pendingOperation === result.operation) {
