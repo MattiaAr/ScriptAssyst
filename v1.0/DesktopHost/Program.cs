@@ -173,8 +173,8 @@ internal sealed class MainForm : Form
         var configuredPath = GetConfiguredLogPath();
         var directory = Path.GetDirectoryName(configuredPath) ?? root;
         var logPath = GetSessionLogPath();
-        var stem = Path.GetFileNameWithoutExtension(logPath);
-        var extension = Path.GetExtension(logPath);
+        var stem = Path.GetFileNameWithoutExtension(configuredPath);
+        var extension = Path.GetExtension(configuredPath);
         var paths = Directory.Exists(directory)
             ? Directory.GetFiles(directory, stem + "*" + extension).OrderByDescending(File.GetLastWriteTimeUtc).ToArray()
             : Array.Empty<string>();
