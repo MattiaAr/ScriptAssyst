@@ -672,6 +672,22 @@ function showConfirmDeleteOU(identity, name) {
   root.querySelector('#sa-confirm-delete-ou').addEventListener('click',()=>{closeModal();send('deleteOU','',{identity});});
 }
 
+function mutationDetailsHtml(data) {
+  const d=data?.DashboardADAudit||data?.audit||data||{};
+  const rows=[];
+  const add=(label,value)=>{
+    const values=Array.isArray(value)?value.filter(Boolean):[];
+    if(values.length) rows.push('<p><strong>'+escapeHtml(label)+':</strong> '+escapeHtml(values.join(', '))+'</p>');
+  };
+  add('Campi modificati',d.changedFields);
+  add('Gruppi aggiunti',d.groupsAdded||d.added||data?.groups);
+  add('Gruppi rimossi',d.groupsRemoved||d.removed);
+  if(d.sourceOU) rows.push('<p><strong>OU di origine:</strong> '+escapeHtml(d.sourceOU)+'</p>');
+  if(d.destinationOU) rows.push('<p><strong>OU di destinazione:</strong> '+escapeHtml(d.destinationOU)+'</p>');
+  if(d.passwordReset===true) rows.push('<p><strong>Password:</strong> reimpostata; il valore non viene registrato.</p>');
+  if(Array.isArray(data?.groupWarnings)&&data.groupWarnings.length) add('Gruppi non assegnati',data.groupWarnings);
+  return rows.length?'<div class="mutation-summary">'+rows.join('')+'</div>':'';
+}
 function showResultModal(title,subtitle,body){showModal(title,subtitle,body,'<button class="primary" data-modal-cancel>Chiudi</button>');}
 
 function guided() {
@@ -1089,7 +1105,7 @@ function handleMessage(event) {
           const removed=(audit.groupsRemoved||[]).map(escapeHtml).join(', ')||'nessuno';
           showResultModal('Operazione parzialmente completata', result.data?.Name||result.data?.SamAccountName||'', '<div class="modal-error"><strong>Alcune modifiche sono riuscite, altre richiedono verifica.</strong><p>Campi modificati: '+changed+'</p><p>Gruppi aggiunti: '+added+'</p><p>Gruppi rimossi: '+removed+'</p><p>'+escapeHtml(result.error||'Verifica lo stato finale in Active Directory.')+'</p></div>');
         } else {
-          showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+          showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>'+mutationDetailsHtml(result.data));
         }
       } else {
         formRoot.querySelectorAll('input,textarea,button').forEach(el=>{el.disabled=false;});
@@ -1115,7 +1131,7 @@ function handleMessage(event) {
       const changed=(audit.changedFields||[]).map(escapeHtml).join(', ')||'—';
       showResultModal('Operazione parzialmente completata', result.data?.message||'Stato finale verificato parzialmente.', '<div class="modal-error"><p>Campi modificati: '+changed+'</p><p>Gruppi aggiunti: '+added+'</p><p>Gruppi rimossi: '+removed+'</p><p>'+escapeHtml(result.error||'Verifica lo stato finale in Active Directory.')+'</p></div>');
     } else if (result.success) {
-      showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+      showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>'+mutationDetailsHtml(result.data));
     } else {
       let errorMessage = result.error || 'Errore non specificato';
       if (result.operation === 'deleteOU' && /value does not fall within the expected range/i.test(errorMessage)) {
