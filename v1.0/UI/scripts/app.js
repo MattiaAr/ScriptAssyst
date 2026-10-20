@@ -744,9 +744,9 @@ function logsPage() {
   const meta=[operator,computer].filter(v=>v&&v!=='—').join(' · ');
   const operations=[...group.events].sort((a,b)=>new Date(a.timestamp||0)-new Date(b.timestamp||0));
   const operationMarkup=operations.map(entry=>{
-   const time=auditTime(entry.timestamp),label=auditActionLabel(entry.action),success=entry.success===true,target=entry.target||'';
+   const time=auditTime(entry.timestamp),label=auditActionLabel(entry.action),success=entry.success===true,target=entry.target||'',status=entry.status||(success?'success':'failed'),statusText=status==='partial'?(en?'Partial':'Parziale'):(success?(en?'Succeeded':'Riuscita'):(en?'Failed':'Fallita'));
    const context=[entry.adminAccount?((en?'AD account: ':'Account AD: ')+entry.adminAccount):'',entry.domainController?((en?'DC: ':'Controller: ')+entry.domainController):''].filter(Boolean).join(' · ');
-   return '<article class="log-operation-row '+(success?'operation-success':'operation-failed')+'"><time class="log-operation-time">'+escapeHtml(time)+'</time><div class="log-operation-main"><div class="log-operation-title"><strong>'+escapeHtml(label)+'</strong><span class="audit-status '+(success?'success':'failed')+'">'+(success?(en?'Succeeded':'Riuscita'):(en?'Failed':'Fallita'))+'</span></div>'+(target?'<div class="log-operation-target">'+escapeHtml(target)+'</div>':'')+(context?'<div class="log-session-meta">'+escapeHtml(context)+'</div>':'')+(entry.error?'<div class="log-event-error">'+escapeHtml(entry.error)+'</div>':'')+auditRawDetails(entry)+'</div></article>';
+   return '<article class="log-operation-row '+(status==='partial'?'operation-partial':(success?'operation-success':'operation-failed'))+'"><time class="log-operation-time">'+escapeHtml(time)+'</time><div class="log-operation-main"><div class="log-operation-title"><strong>'+escapeHtml(label)+'</strong><span class="audit-status '+escapeHtml(status)+'">'+statusText+'</span></div>'+(target?'<div class="log-operation-target">'+escapeHtml(target)+'</div>':'')+(context?'<div class="log-session-meta">'+escapeHtml(context)+'</div>':'')+(entry.error?'<div class="log-event-error">'+escapeHtml(entry.error)+'</div>':'')+auditRawDetails(entry)+'</div></article>';
   }).join('');
   let endMarkup='';
   if(group.end){
