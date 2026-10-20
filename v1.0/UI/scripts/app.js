@@ -759,6 +759,8 @@ function logsPage() {
   if(group.end){
    const duration=group.start?Math.max(0,new Date(group.end.timestamp)-new Date(group.start.timestamp))/60000:null;
    endMarkup='<div class="log-session-footer session-ended"><span class="log-session-marker"></span><div><strong>'+(en?'Signed out':'Uscita')+' · '+escapeHtml(auditTime(group.end.timestamp))+'</strong>'+(duration!==null?'<small>'+(en?'Duration: ':'Durata: ')+escapeHtml(duration.toLocaleString(en?'en-GB':'it-IT',{maximumFractionDigits:1}))+' min</small>':'')+'</div>'+auditRawDetails(group.end)+'</div>';
+  }else if(selected.active&&group.start){
+   endMarkup='<div class="log-session-footer session-open"><span class="log-session-marker"></span><div><strong>'+(en?'Session in progress':'Sessione in corso')+'</strong><small>'+(en?'The session end will be recorded when the application closes normally.':'La chiusura verrà registrata quando l’applicazione verrà chiusa normalmente.')+'</small></div></div>';
   }else{
    endMarkup='<div class="log-session-footer session-open"><span class="log-session-marker"></span><div><strong>'+(en?'Session end not recorded':'Chiusura non registrata')+'</strong><small>'+(en?'The log contains no normal shutdown event.':'Nel file non risulta un evento di chiusura regolare.')+'</small></div></div>';
   }
