@@ -21,6 +21,8 @@ internal sealed class MainForm : Form
     private readonly WebView2 view = new() { Dock = DockStyle.Fill };
     private readonly string root = AppContext.BaseDirectory;
     private readonly string sessionId = Guid.NewGuid().ToString("N");
+    private readonly DateTimeOffset sessionStartedLocal = DateTimeOffset.Now;
+    private string? sessionLogPath;
     private bool sessionEndLogged;
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
@@ -46,6 +48,7 @@ internal sealed class MainForm : Form
 
     private async Task InitializeViewAsync()
     {
+        sessionLogPath = CreateSessionLogPath();
         WriteAuditEvent("session_start", sessionId, true, null, null);
         await view.EnsureCoreWebView2Async();
         view.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
@@ -69,6 +72,33 @@ internal sealed class MainForm : Form
         return Environment.ExpandEnvironmentVariables(configured);
     }
 
+    private string GetOperatorName()
+    {
+        return string.IsNullOrWhiteSpace(Environment.UserDomainName)
+            ? Environment.UserName
+            : Environment.UserDomainName + "\\\\" + Environment.UserName;
+    }
+
+    private string CreateSessionLogPath()
+    {
+        var configuredPath = GetConfiguredLogPath();
+        var directory = Path.GetDirectoryName(configuredPath) ?? root;
+        var stem = Path.GetFileNameWithoutExtension(configuredPath);
+        var extension = Path.GetExtension(configuredPath);
+        var operatorToken = string.Concat(GetOperatorName().Select(ch =>
+            ch == '\\\\' || ch == '/' || Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
+        operatorToken = operatorToken.Trim(' ', '.', '-');
+        if (string.IsNullOrWhiteSpace(operatorToken)) operatorToken = "unknown-operator";
+        var stamp = sessionStartedLocal.ToString("yyyyMMdd-HHmmss-fff");
+        var path = Path.Combine(directory, $"{stem}_{operatorToken}_{stamp}{extension}");
+        var suffix = 1;
+        while (File.Exists(path))
+            path = Path.Combine(directory, $"{stem}_{operatorToken}_{stamp}-{suffix++}{extension}");
+        return path;
+    }
+
+    private string GetSessionLogPath() => sessionLogPath ??= CreateSessionLogPath();
+
     private int GetConfiguredMaxLogSizeMb()
     {
         try
@@ -86,7 +116,7 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var logPath = GetConfiguredLogPath();
+            var logPath = GetSessionLogPath();
             var directory = Path.GetDirectoryName(logPath);
             if (!string.IsNullOrWhiteSpace(directory))
                 Directory.CreateDirectory(directory);
@@ -121,7 +151,8 @@ internal sealed class MainForm : Form
             var bytes = Encoding.UTF8.GetByteCount(line + Environment.NewLine);
             var maxBytes = (long)GetConfiguredMaxLogSizeMb() * 1024 * 1024;
             var info = new FileInfo(logPath);
-            if (info.Exists && info.Length + bytes > maxBytes)
+            // Un file per sessione non viene ruotato: avvio, modifiche e chiusura restano insieme.
+            if (sessionLogPath is null && info.Exists && info.Length + bytes > maxBytes)
             {
                 var stem = Path.GetFileNameWithoutExtension(logPath);
                 var extension = Path.GetExtension(logPath);
@@ -139,8 +170,9 @@ internal sealed class MainForm : Form
 
     private string ReadAuditLogsResponse()
     {
-        var logPath = GetConfiguredLogPath();
-        var directory = Path.GetDirectoryName(logPath) ?? root;
+        var configuredPath = GetConfiguredLogPath();
+        var directory = Path.GetDirectoryName(configuredPath) ?? root;
+        var logPath = GetSessionLogPath();
         var stem = Path.GetFileNameWithoutExtension(logPath);
         var extension = Path.GetExtension(logPath);
         var paths = Directory.Exists(directory)
@@ -216,6 +248,8 @@ internal sealed class MainForm : Form
             psi.ArgumentList.Add("-File");
             psi.ArgumentList.Add(script);
             psi.ArgumentList.Add("-ReadRequestFromStdin");
+            psi.Environment["DASHBOARDAD_SESSION_LOG_PATH"] = GetSessionLogPath();
+            psi.Environment["DASHBOARDAD_SESSION_ID"] = sessionId;
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Impossibile avviare PowerShell.");
             var outputTask = process.StandardOutput.ReadToEndAsync();
