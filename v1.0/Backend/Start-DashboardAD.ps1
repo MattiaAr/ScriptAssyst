@@ -181,8 +181,12 @@ try {
     $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GroupsSpecified $groupsSpecified -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
     if ($Operation -eq 'status' -and $result.success -and $result.data.adConnected) {
         Write-DashboardADLog -Action 'ad_connection_succeeded' -Target ([string]$result.data.domain) -Success $true -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection'
+    } elseif ($Operation -eq 'status' -and $result.success -and -not $result.data.adConnected) {
+        Write-DashboardADLog -Action 'ad_connection_failed' -Target ([string]$result.data.domain) -Success $false -ErrorMessage ([string]$result.data.message) -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection' -Status 'failed'
     } elseif ($Operation -eq 'dashboard' -and $result.success -and $result.data.status.adConnected) {
         Write-DashboardADLog -Action 'ad_connection_succeeded' -Target ([string]$result.data.status.domain) -Success $true -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection'
+    } elseif ($Operation -eq 'dashboard' -and $result.success -and -not $result.data.status.adConnected) {
+        Write-DashboardADLog -Action 'ad_connection_failed' -Target ([string]$result.data.status.domain) -Success $false -ErrorMessage ([string]$result.data.status.message) -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection' -Status 'failed'
     }
     if ($Operation -in $script:DashboardADMutationOperations) {
         $target = switch ($Operation) {
