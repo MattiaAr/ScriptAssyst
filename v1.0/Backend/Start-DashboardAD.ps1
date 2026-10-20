@@ -81,7 +81,11 @@ function Write-DashboardADLog {
         [string]$EventType = 'ad_operation'
     )
     try {
-        $logPath = [Environment]::ExpandEnvironmentVariables([string]$config.Logging.Path)
+        $logPath = if (-not [string]::IsNullOrWhiteSpace($env:DASHBOARDAD_SESSION_LOG_PATH)) {
+            $env:DASHBOARDAD_SESSION_LOG_PATH
+        } else {
+            [Environment]::ExpandEnvironmentVariables([string]$config.Logging.Path)
+        }
         if ([string]::IsNullOrWhiteSpace($logPath)) { return }
         $directory = Split-Path -Parent $logPath
         if ($directory -and -not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
@@ -91,6 +95,7 @@ function Write-DashboardADLog {
         $line = [ordered]@{
             timestamp = [DateTimeOffset]::UtcNow.ToString('o')
             eventType = $EventType
+            sessionId = $(if (-not [string]::IsNullOrWhiteSpace($env:DASHBOARDAD_SESSION_ID)) { $env:DASHBOARDAD_SESSION_ID } else { $null })
             operator = $(if ($env:USERDOMAIN) { "$($env:USERDOMAIN)\$($env:USERNAME)" } else { [string]$env:USERNAME })
             adminAccount = $AdminAccount
             sourceComputer = [string]$env:COMPUTERNAME
@@ -102,7 +107,8 @@ function Write-DashboardADLog {
             ticket = $null
         } | ConvertTo-Json -Compress -Depth 5
         $bytes = [System.Text.Encoding]::UTF8.GetByteCount($line + [Environment]::NewLine)
-        if ((Test-Path -LiteralPath $logPath -PathType Leaf) -and ((Get-Item -LiteralPath $logPath).Length + $bytes -gt $maxBytes)) {
+        # Il file dedicato alla sessione non si ruota: start, operazioni e chiusura devono restare nello stesso file.
+        if ([string]::IsNullOrWhiteSpace($env:DASHBOARDAD_SESSION_LOG_PATH) -and (Test-Path -LiteralPath $logPath -PathType Leaf) -and ((Get-Item -LiteralPath $logPath).Length + $bytes -gt $maxBytes)) {
             $parent = Split-Path -Parent $logPath
             $stem = [IO.Path]::GetFileNameWithoutExtension($logPath)
             $ext = [IO.Path]::GetExtension($logPath)
