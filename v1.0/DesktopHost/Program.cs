@@ -24,6 +24,8 @@ internal sealed class MainForm : Form
     private readonly DateTimeOffset sessionStartedLocal = DateTimeOffset.Now;
     private string? sessionLogPath;
     private bool sessionEndLogged;
+    private bool closeAfterPendingOperations;
+    private readonly Dictionary<Process, string> activeProcesses = new();
 
     private static readonly HashSet<string> AllowedOperations = new(StringComparer.Ordinal)
     {
@@ -38,8 +40,33 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(900, 620);
         Controls.Add(view);
         Load += async (_, _) => await InitializeViewAsync();
-        FormClosing += (_, _) =>
+        FormClosing += async (_, e) =>
         {
+            if (activeProcesses.Count > 0 && !closeAfterPendingOperations)
+            {
+                e.Cancel = true;
+                closeAfterPendingOperations = true;
+                Enabled = false;
+                var pending = activeProcesses.ToArray();
+                await Task.WhenAll(pending.Select(async entry =>
+                {
+                    try
+                    {
+                        await entry.Key.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+                    }
+                    catch (TimeoutException)
+                    {
+                        WriteAuditEvent("operation_interrupted", entry.Value, false,
+                            "Chiusura richiesta dopo 30 secondi: il processo PowerShell è stato interrotto; verificare lo stato finale in Active Directory.", null);
+                        try { entry.Key.Kill(entireProcessTree: true); } catch { }
+                        try { await entry.Key.WaitForExitAsync(); } catch { }
+                    }
+                    catch { }
+                }));
+                Close();
+                return;
+            }
+
             if (sessionEndLogged) return;
             sessionEndLogged = true;
             WriteAuditEvent("session_end", sessionId, true, null, null);
@@ -48,18 +75,59 @@ internal sealed class MainForm : Form
 
     private async Task InitializeViewAsync()
     {
-        sessionLogPath = CreateSessionLogPath();
-        WriteAuditEvent("session_start", sessionId, true, null, null);
-        await view.EnsureCoreWebView2Async();
-        view.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
-        var page = Path.Combine(root, "UI", "index.html");
-        if (!File.Exists(page))
+        try
         {
-            MessageBox.Show($"Interfaccia non trovata: {page}", "Dashboard AD");
-            Close();
-            return;
+            var configPath = Path.Combine(root, "DashboardAD.config.json");
+            var backendPath = Path.Combine(root, "Backend", "Start-DashboardAD.ps1");
+            var page = Path.Combine(root, "UI", "index.html");
+            if (!File.Exists(configPath))
+                throw new FileNotFoundException("Configurazione mancante. Ripristina DashboardAD.config.json nella cartella dell'applicazione.", configPath);
+            if (!File.Exists(backendPath))
+                throw new FileNotFoundException("Backend PowerShell mancante. Estrai nuovamente il pacchetto completo di DashboardAD.", backendPath);
+            if (!File.Exists(page))
+                throw new FileNotFoundException("Interfaccia HTML mancante. Estrai nuovamente la cartella UI insieme all'eseguibile.", page);
+
+            using (JsonDocument.Parse(File.ReadAllText(configPath, Encoding.UTF8))) { }
+            sessionLogPath = CreateSessionLogPath();
+            WriteAuditEvent("session_start", sessionId, true, null, null);
+
+            try
+            {
+                using var check = new Process();
+                check.StartInfo = new ProcessStartInfo("powershell.exe")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    ArgumentList = { "-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()" }
+                };
+                if (!check.Start())
+                    throw new InvalidOperationException("Windows PowerShell non è disponibile.");
+                var versionTask = check.StandardOutput.ReadToEndAsync();
+                var errorTask = check.StandardError.ReadToEndAsync();
+                await check.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8));
+                var version = (await versionTask).Trim();
+                var error = (await errorTask).Trim();
+                if (check.ExitCode != 0 || string.IsNullOrWhiteSpace(version))
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Windows PowerShell non risponde correttamente." : error);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Prerequisito mancante: Windows PowerShell 5.1 deve essere disponibile nel sistema. Dettaglio: " + ex.Message, ex);
+            }
+
+            await view.EnsureCoreWebView2Async();
+            view.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+            view.Source = new Uri(page);
         }
-        view.Source = new Uri(page);
+        catch (Exception ex)
+        {
+            var message = "DashboardAD non è riuscito ad avviarsi.\n\n" +
+                ex.Message + "\n\nVerifica che il pacchetto sia stato estratto completamente, che DashboardAD.config.json sia valido e che Microsoft Edge WebView2 Runtime sia installato.";
+            MessageBox.Show(this, message, "Avvio DashboardAD non riuscito", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Close();
+        }
     }
 
     private string GetConfiguredLogPath()
@@ -228,7 +296,7 @@ internal sealed class MainForm : Form
             psi.ArgumentList.Add("-NoProfile");
             psi.ArgumentList.Add("-NonInteractive");
             psi.ArgumentList.Add("-ExecutionPolicy");
-            psi.ArgumentList.Add("RemoteSigned");
+            psi.ArgumentList.Add("Bypass"); // Override limitato a questo processo PowerShell; nessuna modifica alla policy globale.
             psi.ArgumentList.Add("-File");
             psi.ArgumentList.Add(script);
             psi.ArgumentList.Add("-ReadRequestFromStdin");
@@ -236,6 +304,7 @@ internal sealed class MainForm : Form
             psi.Environment["DASHBOARDAD_SESSION_ID"] = sessionId;
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Impossibile avviare PowerShell.");
+            activeProcesses[process] = operation;
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
 
@@ -258,6 +327,7 @@ internal sealed class MainForm : Form
             }
 
             await process.WaitForExitAsync();
+            activeProcesses.Remove(process);
             var output = await outputTask;
             var error = await errorTask;
 
