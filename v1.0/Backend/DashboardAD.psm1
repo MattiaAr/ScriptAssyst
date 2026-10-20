@@ -550,12 +550,66 @@ function Update-DashboardADUserGroups {
         }
         $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
     }
+
     $operationErrors = [System.Collections.Generic.List[string]]::new()
+    $protectedDns = @{}
     foreach ($dn in $currentDns) {
         $group = Get-ADGroup -Identity $dn -Properties SID,DistinguishedName -ErrorAction Stop
         $sidText = [string]$group.SID.Value
         $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
-            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+        if ($protected) {
+            $protectedDns[$dn.ToLowerInvariant()] = $dn
+            continue
+        }
+        if ($desired.ContainsKey($dn.ToLowerInvariant())) { continue }
+        try { Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop }
+        catch { $operationErrors.Add("Rimozione da '$($group.Name)': $($_.Exception.Message)") }
+    }
+
+    foreach ($key in @($desired.Keys)) {
+        $group = $desired[$key]
+        if ($currentDns -notcontains $group.DistinguishedName) {
+            try { Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop }
+            catch { $operationErrors.Add("Aggiunta a '$($group.Name)': $($_.Exception.Message)") }
+        }
+    }
+
+    $finalUser = Get-ADUser -Identity $user.DistinguishedName -Properties memberOf,DistinguishedName -ErrorAction Stop
+    $finalDns = @($finalUser.MemberOf | ForEach-Object { [string]$_ })
+    $expectedDns = @{}
+    foreach ($key in $desired.Keys) { $expectedDns[$key] = $desired[$key].DistinguishedName }
+    foreach ($key in $protectedDns.Keys) { $expectedDns[$key] = $protectedDns[$key] }
+    foreach ($key in $expectedDns.Keys) {
+        if ($finalDns -notcontains $expectedDns[$key]) { $operationErrors.Add("Verifica finale: appartenenza attesa non presente ($($expectedDns[$key])).") }
+    }
+    foreach ($dn in $finalDns) {
+        if (-not $expectedDns.ContainsKey($dn.ToLowerInvariant())) {
+            $operationErrors.Add("Verifica finale: appartenenza non prevista ancora presente ($dn).")
+        }
+    }
+
+    $added = [System.Collections.Generic.List[string]]::new()
+    $removed = [System.Collections.Generic.List[string]]::new()
+    foreach ($dn in $finalDns) {
+        if ($currentDns -notcontains $dn) {
+            try { $added.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $added.Add($dn) }
+        }
+    }
+    foreach ($dn in $currentDns) {
+        if ($finalDns -notcontains $dn) {
+            try { $removed.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $removed.Add($dn) }
+        }
+    }
+    $operationStatus = if ($operationErrors.Count) { 'partial' } else { 'success' }
+    [pscustomobject]@{
+        message = "Appartenenze verificate in Active Directory. Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        operationStatus = $operationStatus
+        error = if ($operationErrors.Count) { $operationErrors -join '; ' } else { $null }
+        added = @($added)
+        removed = @($removed)
+        currentMemberships = @($finalDns)
+    }
 }
 
 function Invoke-DashboardADRequest {
