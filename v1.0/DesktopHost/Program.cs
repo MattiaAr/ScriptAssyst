@@ -135,9 +135,7 @@ internal sealed class MainForm : Form
                 timestamp = DateTimeOffset.UtcNow.ToString("O"),
                 eventType = action.StartsWith("session_", StringComparison.Ordinal) ? "session" : "application",
                 sessionId,
-                @operator = string.IsNullOrWhiteSpace(Environment.UserDomainName)
-                    ? Environment.UserName
-                    : Environment.UserDomainName + "\\" + Environment.UserName,
+                @operator = GetOperatorName(),
                 adminAccount = adminAccount ?? "",
                 sourceComputer = Environment.MachineName,
                 domainController = controller ?? "",
