@@ -297,22 +297,68 @@ function Get-DashboardADGroupMembers {
     [pscustomobject]@{group=$g.DistinguishedName;name=$g.Name;members=$members}
 }
 function Update-DashboardADGroupMembers {
+    [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Identity,[string[]]$Members=@())
     Import-Module ActiveDirectory -ErrorAction Stop
-    $g=Get-ADGroup -Identity $Identity -Properties SID -ErrorAction Stop
+    $g=Get-ADGroup -Identity $Identity -Properties SID,DistinguishedName,Name -ErrorAction Stop
     if(Test-DashboardADDefaultGroup $g){throw 'I membri dei gruppi predefiniti non possono essere modificati da questa schermata.'}
-    $current=@(Get-ADGroupMember -Identity $g.DistinguishedName -Recursive:$false -ErrorAction Stop);$desired=@{}
+    $current=@(Get-ADGroupMember -Identity $g.DistinguishedName -Recursive:$false -ErrorAction Stop)
+    $desired=@{}
     foreach($entry in @($Members)){
         if([string]::IsNullOrWhiteSpace([string]$entry)){continue}
         $obj=$null
-        try{$obj=Get-ADObject -Identity ([string]$entry) -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop}catch{$escaped=([string]$entry).Replace("'","''");$obj=Get-ADObject -Filter "Name -eq '$escaped' -or SamAccountName -eq '$escaped'" -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop | Select-Object -First 1}
-        if(-not $obj){throw "Membro non trovato: '$entry'."};$desired[$obj.DistinguishedName.ToLowerInvariant()]=$obj
+        try{$obj=Get-ADObject -Identity ([string]$entry) -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop}
+        catch{
+            $escaped=([string]$entry).Replace("'","''")
+            $obj=Get-ADObject -Filter "Name -eq '$escaped' -or SamAccountName -eq '$escaped'" -Properties Name,DistinguishedName,ObjectClass -ErrorAction Stop | Select-Object -First 1
+        }
+        if(-not $obj){throw "Membro non trovato: '$entry'."}
+        $desired[$obj.DistinguishedName.ToLowerInvariant()]=$obj
     }
-    $added=[System.Collections.Generic.List[string]]::new();$removed=[System.Collections.Generic.List[string]]::new()
-    foreach($m in $current){if(-not $desired.ContainsKey($m.DistinguishedName.ToLowerInvariant())){Remove-ADGroupMember -Identity $g.DistinguishedName -Members $m.DistinguishedName -Confirm:$false -ErrorAction Stop;$removed.Add($m.Name)}}
-    foreach($key in $desired.Keys){if(-not ($current | Where-Object {$_.DistinguishedName -ieq $desired[$key].DistinguishedName})){Add-ADGroupMember -Identity $g.DistinguishedName -Members $desired[$key].DistinguishedName -ErrorAction Stop;$added.Add($desired[$key].Name)}}
-    [pscustomobject]@{message="Membri aggiornati per '$($g.Name)'. Aggiunti: $($added.Count); rimossi: $($removed.Count).";added=@($added);removed=@($removed)}
+
+    $operationErrors=[System.Collections.Generic.List[string]]::new()
+    foreach($m in $current){
+        if(-not $desired.ContainsKey($m.DistinguishedName.ToLowerInvariant())){
+            try{Remove-ADGroupMember -Identity $g.DistinguishedName -Members $m.DistinguishedName -Confirm:$false -ErrorAction Stop}
+            catch{$operationErrors.Add("Rimozione di '$($m.Name)': $($_.Exception.Message)")}
+        }
+    }
+    foreach($key in $desired.Keys){
+        $member=$desired[$key]
+        if(-not ($current | Where-Object {$_.DistinguishedName -ieq $member.DistinguishedName})){
+            try{Add-ADGroupMember -Identity $g.DistinguishedName -Members $member.DistinguishedName -ErrorAction Stop}
+            catch{$operationErrors.Add("Aggiunta di '$($member.Name)': $($_.Exception.Message)")}
+        }
+    }
+
+    $final=@(Get-ADGroupMember -Identity $g.DistinguishedName -Recursive:$false -ErrorAction Stop)
+    $finalDns=@($final | ForEach-Object {[string]$_.DistinguishedName})
+    foreach($key in $desired.Keys){
+        if($finalDns -notcontains $desired[$key].DistinguishedName){$operationErrors.Add("Verifica finale: membro atteso non presente ($($desired[$key].Name)).")}
+    }
+    foreach($m in $final){
+        if(-not $desired.ContainsKey($m.DistinguishedName.ToLowerInvariant())){$operationErrors.Add("Verifica finale: membro non previsto ancora presente ($($m.Name)).")}
+    }
+
+    $added=[System.Collections.Generic.List[string]]::new()
+    $removed=[System.Collections.Generic.List[string]]::new()
+    foreach($m in $final){
+        if(-not ($current | Where-Object {$_.DistinguishedName -ieq $m.DistinguishedName})){$added.Add($m.Name)}
+    }
+    foreach($m in $current){
+        if(-not ($final | Where-Object {$_.DistinguishedName -ieq $m.DistinguishedName})){$removed.Add($m.Name)}
+    }
+    $operationStatus=if($operationErrors.Count){'partial'}else{'success'}
+    [pscustomobject]@{
+        message="Membri verificati in Active Directory per '$($g.Name)'. Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        operationStatus=$operationStatus
+        error=if($operationErrors.Count){$operationErrors -join '; '}else{$null}
+        added=@($added)
+        removed=@($removed)
+        currentMembers=@($final | Select-Object Name,SamAccountName,DistinguishedName,ObjectClass)
+    }
 }
+
 function New-DashboardADGroup {
     param([Parameter(Mandatory)][string]$GroupName,[Parameter(Mandatory)][string]$Path,[string]$Description='',[ValidateSet('Security','Distribution')][string]$GroupCategory='Security',[ValidateSet('Global','Universal','DomainLocal')][string]$GroupScope='Global')
     Import-Module ActiveDirectory -ErrorAction Stop
