@@ -645,6 +645,7 @@ function Invoke-DashboardADRequest {
         [string]$Password = '',
         [bool]$ChangePasswordAtLogon = $false,
         [string[]]$Groups = @(),
+        [bool]$GroupsSpecified = $false,
         [string]$GivenName = '',
         [string]$Surname = '',
         [string]$DisplayName = '',
