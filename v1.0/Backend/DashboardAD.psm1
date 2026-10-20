@@ -360,15 +360,23 @@ function Set-DashboardADUser {
         $set.UserPrincipalName = $UserPrincipalName
     }
 
+    $fieldErrors = [System.Collections.Generic.List[string]]::new()
     Set-ADUser @set
     if ($clear.Count -gt 0) {
-        Set-ADUser -Identity $user.DistinguishedName -Clear $clear.ToArray() -ErrorAction Stop
+        try { Set-ADUser -Identity $user.DistinguishedName -Clear $clear.ToArray() -ErrorAction Stop }
+        catch { $fieldErrors.Add("Pulizia attributi: $($_.Exception.Message)") }
     }
+
+    $groupChanges = $null
+    $groupError = $null
     if ($GroupsSpecified) {
         # Un array esplicitamente vuoto significa rimuovere tutte le appartenenze dirette modificabili.
         # Le appartenenze protette e il gruppo primario sono esclusi dalla funzione di aggiornamento.
-        $groupChanges = Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
-    } else { $groupChanges = $null }
+        try {
+            $groupChanges = Update-DashboardADUserGroups -Identity $user.DistinguishedName -Groups $Groups
+            if ($groupChanges.operationStatus -eq 'partial') { $groupError = [string]$groupChanges.error }
+        } catch { $groupError = $_.Exception.Message }
+    }
 
     $updatedUser = Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
     $changedFields = [System.Collections.Generic.List[string]]::new()
@@ -386,13 +394,26 @@ function Set-DashboardADUser {
     if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName) -and [string]$user.UserPrincipalName -cne [string]$updatedUser.UserPrincipalName) {
         $changedFields.Add('userPrincipalName')
     }
-    $audit = [ordered]@{ operationStatus = 'success'; error = $null; changedFields = @($changedFields); groupsAdded = @(); groupsRemoved = @() }
-    if ($groupChanges) {
-        $audit.groupsAdded = @($groupChanges.added)
-        $audit.groupsRemoved = @($groupChanges.removed)
-        if ($groupChanges.operationStatus -eq 'partial') { $audit.operationStatus = 'partial'; $audit.error = [string]$groupChanges.error }
-        $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force
+    $groupsAdded = [System.Collections.Generic.List[string]]::new()
+    $groupsRemoved = [System.Collections.Generic.List[string]]::new()
+    $beforeDns = @($user.MemberOf | ForEach-Object { [string]$_ })
+    $afterDns = @($updatedUser.MemberOf | ForEach-Object { [string]$_ })
+    foreach ($dn in $afterDns) {
+        if ($beforeDns -notcontains $dn) {
+            try { $groupsAdded.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $groupsAdded.Add($dn) }
+        }
     }
+    foreach ($dn in $beforeDns) {
+        if ($afterDns -notcontains $dn) {
+            try { $groupsRemoved.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $groupsRemoved.Add($dn) }
+        }
+    }
+    $auditErrors = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $fieldErrors) { $auditErrors.Add($item) }
+    if (-not [string]::IsNullOrWhiteSpace($groupError)) { $auditErrors.Add("Appartenenze gruppi: $groupError") }
+    $auditStatus = if ($auditErrors.Count) { 'partial' } else { 'success' }
+    $audit = [ordered]@{ operationStatus = $auditStatus; error = if ($auditErrors.Count) { $auditErrors -join '; ' } else { $null }; changedFields = @($changedFields); groupsAdded = @($groupsAdded); groupsRemoved = @($groupsRemoved) }
+    if ($groupChanges) { $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force }
     $updatedUser | Add-Member -NotePropertyName DashboardADAudit -NotePropertyValue $audit -Force
     $updatedUser
 }
