@@ -186,6 +186,7 @@ function Invoke-DashboardADUserAction {
             if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Specificare il Distinguished Name della OU di destinazione.' }
             $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
             if (($user.DistinguishedName -split ',',2)[1] -ieq $ou.DistinguishedName) { throw 'L’utente si trova già nella OU di destinazione.' }
+            $sourceOU = ($user.DistinguishedName -split ',',2)[1]
             Move-ADObject -Identity $user.DistinguishedName -TargetPath $ou.DistinguishedName -Confirm:$false -ErrorAction Stop
             $message = "Account $($user.SamAccountName) spostato in $($ou.DistinguishedName)."
         }
@@ -200,7 +201,7 @@ function Invoke-DashboardADUserAction {
     }
     $updated = Get-ADUser -Identity $user.SamAccountName -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut -ErrorAction Stop |
         Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut
-    [pscustomobject]@{ message=$message; user=$updated }
+    [pscustomobject]@{ message=$message; user=$updated; audit=$(if ($Operation -eq 'moveUser') { [ordered]@{ sourceOU=$sourceOU; destinationOU=$ou.DistinguishedName } } elseif ($Operation -eq 'resetPassword') { [ordered]@{ passwordReset=$true } } else { $null }) }
 }
 
 function Test-DashboardADDefaultGroup {
@@ -336,7 +337,7 @@ function Set-DashboardADUser {
     param([Parameter(Mandatory)][string]$Identity,[string]$GivenName='',[string]$Surname='',[string]$DisplayName='',[string]$UserPrincipalName='',[string]$Department='',[string]$Title='',[string]$Email='',[string]$Description='',[string[]]$Groups=@(),[bool]$GroupsSpecified=$false)
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
-    $user=Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName -ErrorAction Stop
+    $user=Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName,GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description -ErrorAction Stop
     $rid=[string]$user.SID.Value.Split('-')[-1]
     if ($rid -in @('500','501','502')) { throw 'Non è consentito modificare gli account amministratore, guest o krbtgt predefiniti.' }
     $set=@{Identity=$user.DistinguishedName;ErrorAction='Stop'}
@@ -370,7 +371,28 @@ function Set-DashboardADUser {
     } else { $groupChanges = $null }
 
     $updatedUser = Get-ADUser -Identity $user.DistinguishedName -Properties GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,Enabled,MemberOf -ErrorAction Stop
-    if ($groupChanges) { $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force }
+    $changedFields = [System.Collections.Generic.List[string]]::new()
+    foreach ($field in @(
+        @{Name='givenName';Before=$user.GivenName;After=$updatedUser.GivenName},
+        @{Name='sn';Before=$user.Surname;After=$updatedUser.Surname},
+        @{Name='displayName';Before=$user.DisplayName;After=$updatedUser.DisplayName},
+        @{Name='department';Before=$user.Department;After=$updatedUser.Department},
+        @{Name='title';Before=$user.Title;After=$updatedUser.Title},
+        @{Name='mail';Before=$user.mail;After=$updatedUser.mail},
+        @{Name='description';Before=$user.Description;After=$updatedUser.Description}
+    )) {
+        if ([string]$field.Before -cne [string]$field.After) { $changedFields.Add([string]$field.Name) }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName) -and [string]$user.UserPrincipalName -cne [string]$updatedUser.UserPrincipalName) {
+        $changedFields.Add('userPrincipalName')
+    }
+    $audit = [ordered]@{ changedFields = @($changedFields); groupsAdded = @(); groupsRemoved = @() }
+    if ($groupChanges) {
+        $audit.groupsAdded = @($groupChanges.added)
+        $audit.groupsRemoved = @($groupChanges.removed)
+        $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force
+    }
+    $updatedUser | Add-Member -NotePropertyName DashboardADAudit -NotePropertyValue $audit -Force
     $updatedUser
 }
 

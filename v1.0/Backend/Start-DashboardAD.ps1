@@ -27,6 +27,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$groupsSpecified = $false
 if ($ReadRequestFromStdin) {
     $json = [Console]::In.ReadToEnd()
     if ([string]::IsNullOrWhiteSpace($json)) { throw 'Richiesta JSON mancante sullo standard input.' }
@@ -68,7 +69,6 @@ $configPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'DashboardAD.config.j
 $selectedDC = $null
 $config = $null
 $credential = $null
-$groupsSpecified = $false
 $script:DashboardADMutationOperations = @(
     'createOU','updateOU','deleteOU','disableUser','enableUser','moveUser','resetPassword',
     'updateUserGroups','createUser','updateUser','copyUser','updateGroupMembers',
@@ -82,7 +82,8 @@ function Write-DashboardADLog {
         [string]$ErrorMessage = '',
         [string]$Controller = '',
         [string]$AdminAccount = '',
-        [string]$EventType = 'ad_operation'
+        [string]$EventType = 'ad_operation',
+        [object]$Details = $null
     )
     try {
         $logPath = if (-not [string]::IsNullOrWhiteSpace($env:DASHBOARDAD_SESSION_LOG_PATH)) {
@@ -106,6 +107,7 @@ function Write-DashboardADLog {
             domainController = $Controller
             action = $Action
             target = $Target
+            details = $Details
             success = $Success
             error = $(if ($Success -or [string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage })
             ticket = $null
@@ -175,6 +177,11 @@ try {
     $global:PSDefaultParameterValues['*-AD*:Credential'] = $credential
     Import-Module (Join-Path $PSScriptRoot 'DashboardAD.psm1') -Force
     $result = Invoke-DashboardADRequest -Operation $Operation -Query $Query -Identity $Identity -DestinationOU $DestinationOU -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon -Groups $Groups -GroupsSpecified $groupsSpecified -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Path $Path -GroupName $GroupName -GroupCategory $GroupCategory -GroupScope $GroupScope -Members $Members -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion
+    if ($Operation -eq 'status' -and $result.success -and $result.data.adConnected) {
+        Write-DashboardADLog -Action 'ad_connection_succeeded' -Target ([string]$result.data.domain) -Success $true -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection'
+    } elseif ($Operation -eq 'dashboard' -and $result.success -and $result.data.status.adConnected) {
+        Write-DashboardADLog -Action 'ad_connection_succeeded' -Target ([string]$result.data.status.domain) -Success $true -Controller $selectedDC -AdminAccount $credential.UserName -EventType 'ad_connection'
+    }
     if ($Operation -in $script:DashboardADMutationOperations) {
         $target = switch ($Operation) {
             { $_ -in @('createOU','createGroup') } { if ($GroupName) { $GroupName } else { $Path }; break }
@@ -184,7 +191,17 @@ try {
         }
         $safeError = [string]$result.error
         if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
-        Write-DashboardADLog -Action $Operation -Target $target -Success ([bool]$result.success) -ErrorMessage $safeError -Controller $selectedDC -AdminAccount $credential.UserName
+        $auditDetails = $null
+        if ($result.data -and $result.data.PSObject.Properties['DashboardADAudit']) {
+            $auditDetails = $result.data.DashboardADAudit
+        } elseif ($result.data -and $result.data.PSObject.Properties['audit']) {
+            $auditDetails = $result.data.audit
+        } elseif ($result.data -and ($result.data.PSObject.Properties['added'] -or $result.data.PSObject.Properties['removed'])) {
+            $auditDetails = [ordered]@{ groupsAdded = @($result.data.added); groupsRemoved = @($result.data.removed) }
+        } elseif ($result.data -and $result.data.PSObject.Properties['groupWarnings']) {
+            $auditDetails = [ordered]@{ groupsAdded = @($result.data.groups); groupWarnings = @($result.data.groupWarnings) }
+        }
+        Write-DashboardADLog -Action $Operation -Target $target -Success ([bool]$result.success) -ErrorMessage $safeError -Controller $selectedDC -AdminAccount $credential.UserName -Details $auditDetails
     }
     $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
