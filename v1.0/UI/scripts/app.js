@@ -1065,10 +1065,18 @@ function handleMessage(event) {
     const ouMutation = ['createOU','updateOU','deleteOU'].includes(result.operation);
     if (userMutation && document.querySelector('#sa-modal-root')?.dataset.pendingOperation === result.operation) {
       const formRoot = document.querySelector('#sa-modal-root');
-      if (result.success) {
+      if (result.success || result.status === 'partial') {
         closeModal();
         window.__DashboardADPendingForm = null;
-        showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+        if (result.status === 'partial') {
+          const audit=result.data?.DashboardADAudit||{};
+          const changed=(audit.changedFields||[]).map(escapeHtml).join(', ')||'nessun campo attributo confermato';
+          const added=(audit.groupsAdded||[]).map(escapeHtml).join(', ')||'nessuno';
+          const removed=(audit.groupsRemoved||[]).map(escapeHtml).join(', ')||'nessuno';
+          showResultModal('Operazione parzialmente completata', result.data?.Name||result.data?.SamAccountName||'', '<div class="modal-error"><strong>Alcune modifiche sono riuscite, altre richiedono verifica.</strong><p>Campi modificati: '+changed+'</p><p>Gruppi aggiunti: '+added+'</p><p>Gruppi rimossi: '+removed+'</p><p>'+escapeHtml(result.error||'Verifica lo stato finale in Active Directory.')+'</p></div>');
+        } else {
+          showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
+        }
       } else {
         formRoot.querySelectorAll('input,textarea,button').forEach(el=>{el.disabled=false;});
         formRoot.querySelector('#sa-save-progress')?.remove();
@@ -1086,6 +1094,12 @@ function handleMessage(event) {
           formRoot.querySelector('#sa-form-error')?.focus?.();
         }
       }
+    } else if (result.status === 'partial') {
+      const audit=result.data?.DashboardADAudit||result.data||{};
+      const added=(audit.groupsAdded||audit.added||[]).map(escapeHtml).join(', ')||'nessuno';
+      const removed=(audit.groupsRemoved||audit.removed||[]).map(escapeHtml).join(', ')||'nessuno';
+      const changed=(audit.changedFields||[]).map(escapeHtml).join(', ')||'—';
+      showResultModal('Operazione parzialmente completata', result.data?.message||'Stato finale verificato parzialmente.', '<div class="modal-error"><p>Campi modificati: '+changed+'</p><p>Gruppi aggiunti: '+added+'</p><p>Gruppi rimossi: '+removed+'</p><p>'+escapeHtml(result.error||'Verifica lo stato finale in Active Directory.')+'</p></div>');
     } else if (result.success) {
       showResultModal('Operazione completata', result.data?.message || 'Modifiche applicate.', '<p>Active Directory ha confermato l’operazione.</p>');
     } else {

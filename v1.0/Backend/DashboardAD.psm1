@@ -337,7 +337,7 @@ function Set-DashboardADUser {
     param([Parameter(Mandatory)][string]$Identity,[string]$GivenName='',[string]$Surname='',[string]$DisplayName='',[string]$UserPrincipalName='',[string]$Department='',[string]$Title='',[string]$Email='',[string]$Description='',[string[]]$Groups=@(),[bool]$GroupsSpecified=$false)
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
-    $user=Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName,GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description -ErrorAction Stop
+    $user=Get-ADUser -Identity $Identity -Properties SID,SamAccountName,DistinguishedName,GivenName,Surname,DisplayName,UserPrincipalName,Department,Title,mail,Description,MemberOf -ErrorAction Stop
     $rid=[string]$user.SID.Value.Split('-')[-1]
     if ($rid -in @('500','501','502')) { throw 'Non è consentito modificare gli account amministratore, guest o krbtgt predefiniti.' }
     $set=@{Identity=$user.DistinguishedName;ErrorAction='Stop'}
@@ -386,10 +386,11 @@ function Set-DashboardADUser {
     if (-not [string]::IsNullOrWhiteSpace($UserPrincipalName) -and [string]$user.UserPrincipalName -cne [string]$updatedUser.UserPrincipalName) {
         $changedFields.Add('userPrincipalName')
     }
-    $audit = [ordered]@{ changedFields = @($changedFields); groupsAdded = @(); groupsRemoved = @() }
+    $audit = [ordered]@{ operationStatus = 'success'; error = $null; changedFields = @($changedFields); groupsAdded = @(); groupsRemoved = @() }
     if ($groupChanges) {
         $audit.groupsAdded = @($groupChanges.added)
         $audit.groupsRemoved = @($groupChanges.removed)
+        if ($groupChanges.operationStatus -eq 'partial') { $audit.operationStatus = 'partial'; $audit.error = [string]$groupChanges.error }
         $updatedUser | Add-Member -NotePropertyName DashboardADGroupChanges -NotePropertyValue $groupChanges -Force
     }
     $updatedUser | Add-Member -NotePropertyName DashboardADAudit -NotePropertyValue $audit -Force
@@ -549,28 +550,124 @@ function Update-DashboardADUserGroups {
         }
         $desired[$group.DistinguishedName.ToLowerInvariant()] = $group
     }
-    $added = [System.Collections.Generic.List[string]]::new()
-    $removed = [System.Collections.Generic.List[string]]::new()
+    $operationErrors = [System.Collections.Generic.List[string]]::new()
     foreach ($dn in $currentDns) {
         $group = Get-ADGroup -Identity $dn -Properties SID,DistinguishedName -ErrorAction Stop
         $sidText = [string]$group.SID.Value
         $protected = $group.DistinguishedName -match '(?i)^CN=[^,]+,CN=Builtin,' -or
-            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)$'
+            $sidText -match '-(498|499|500|501|502|503|504|505|506|507|508|509|510|511|512|513|514|515|516|517|518|519|520|521|522|525|526|527|553|571|572)
+}
+
+function Invoke-DashboardADRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('status','dashboard','users','groups','ous','createOU','updateOU','deleteOU','ouContents','gpos','tasks','disableUser','enableUser','moveUser','resetPassword','userDetails','updateUserGroups','createUser','updateUser','copyUser','availableGroups','groupMembers','searchDirectoryMembers','updateGroupMembers','createGroup','updateGroup','groupDeletePreview','deleteGroup')]
+        [string]$Operation,
+        [ValidateLength(0,128)][string]$Query = '',
+        [string]$Identity = '',
+        [string]$DestinationOU = '',
+        [string]$Password = '',
+        [bool]$ChangePasswordAtLogon = $false,
+        [string[]]$Groups = @(),
+        [string]$GivenName = '',
+        [string]$Surname = '',
+        [string]$DisplayName = '',
+        [string]$UserPrincipalName = '',
+        [string]$Department = '',
+        [string]$Title = '',
+        [string]$Email = '',
+        [string]$Description = '',
+        [string]$Path = '',
+        [string]$GroupName = '',
+        [string]$GroupCategory = 'Security',
+        [string]$GroupScope = 'Global',
+        [string[]]$Members = @(),
+        [bool]$ProtectedFromAccidentalDeletion = $true
+    )
+    try {
+        $data = switch ($Operation) {
+            'status' { Get-DashboardADStatus }
+            'dashboard' { Get-DashboardADDashboard }
+            'users' { Get-DashboardADUsers -Query $Query }
+            'userDetails' { Get-DashboardADUserDetails -Identity $Identity }
+            'availableGroups' { Get-DashboardADAvailableGroups }
+            'createUser' { New-DashboardADUser -Identity $Identity -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'updateUser' { Set-DashboardADUser -Identity $Identity -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -GroupsSpecified $GroupsSpecified }
+            'copyUser' { New-DashboardADUser -Identity $GroupName -DestinationOU $Path -Password $Password -GivenName $GivenName -Surname $Surname -DisplayName $DisplayName -UserPrincipalName $UserPrincipalName -Department $Department -Title $Title -Email $Email -Description $Description -Groups $Groups -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'updateUserGroups' { Update-DashboardADUserGroups -Identity $Identity -Groups $Groups }
+            'groupMembers' { Get-DashboardADGroupMembers -Identity $Identity }
+            'searchDirectoryMembers' { Search-DashboardADDirectoryMembers -Query $Query }
+            'updateGroupMembers' { Update-DashboardADGroupMembers -Identity $Identity -Members $Members }
+            'createGroup' { New-DashboardADGroup -GroupName $GroupName -Path $Path -Description $Description -GroupCategory $GroupCategory -GroupScope $GroupScope }
+            'updateGroup' { Update-DashboardADGroup -Identity $Identity -GroupName $GroupName -Description $Description }
+            'groupDeletePreview' { Get-DashboardADGroupDeletePreview -Identity $Identity }
+            'deleteGroup' { Remove-DashboardADGroup -Identity $Identity }
+            'groups' { Get-DashboardADGroups -Query $Query }
+            'ouContents' { Get-DashboardADOUContents -Identity $Identity }
+            'createOU' { New-DashboardADOU -Name $GroupName -Path $Path -Description $Description -ProtectedFromAccidentalDeletion $ProtectedFromAccidentalDeletion }
+            'updateOU' { Update-DashboardADOU -Identity $Identity -Name $GroupName -Description $Description }
+            'deleteOU' { Remove-DashboardADOU -Identity $Identity }
+            'ous' { Get-DashboardADOUs -Query $Query }
+            'gpos' { Get-DashboardADGpos -Query $Query }
+            'tasks' { Get-DashboardADScheduledTasks -Query $Query }
+            'disableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity }
+            'enableUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+            'moveUser' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -DestinationOU $DestinationOU }
+            'resetPassword' { Invoke-DashboardADUserAction -Operation $Operation -Identity $Identity -Password $Password -ChangePasswordAtLogon $ChangePasswordAtLogon }
+        }
+        $status = 'success'
+        $responseError = $null
+        if ($data -and $data.PSObject.Properties['DashboardADAudit'] -and $data.DashboardADAudit.operationStatus -eq 'partial') {
+            $status = 'partial'
+            $responseError = [string]$data.DashboardADAudit.error
+        } elseif ($data -and $data.PSObject.Properties['operationStatus'] -and $data.operationStatus -eq 'partial') {
+            $status = 'partial'
+            $responseError = [string]$data.error
+        }
+        [pscustomobject]@{ success=($status -eq 'success'); status=$status; operation=$Operation; query=$Query; data=$data; error=$responseError }
+    } catch {
+        [pscustomobject]@{ success=$false; status='failed'; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message }
+    } finally {
+        if ($Password) { $Password = $null }
+    }
+}
+
+Export-ModuleMember -Function Get-DashboardADStatus, Invoke-DashboardADRequest
+
         if ($protected -or $desired.ContainsKey($dn.ToLowerInvariant())) { continue }
-        Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop
-        $removed.Add($group.Name)
+        try { Remove-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -Confirm:$false -ErrorAction Stop }
+        catch { $operationErrors.Add("Rimozione da '$($group.Name)': $($_.Exception.Message)") }
     }
     foreach ($key in @($desired.Keys)) {
         $group = $desired[$key]
         if ($currentDns -notcontains $group.DistinguishedName) {
-            Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop
-            $added.Add($group.Name)
+            try { Add-ADGroupMember -Identity $group.DistinguishedName -Members $user.DistinguishedName -ErrorAction Stop }
+            catch { $operationErrors.Add("Aggiunta a '$($group.Name)': $($_.Exception.Message)") }
         }
     }
+    $finalUser = Get-ADUser -Identity $user.DistinguishedName -Properties memberOf,DistinguishedName -ErrorAction Stop
+    $finalDns = @($finalUser.MemberOf | ForEach-Object { [string]$_ })
+    $added = [System.Collections.Generic.List[string]]::new()
+    $removed = [System.Collections.Generic.List[string]]::new()
+    foreach ($dn in $finalDns) {
+        if ($currentDns -notcontains $dn) {
+            try { $added.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $added.Add($dn) }
+        }
+    }
+    foreach ($dn in $currentDns) {
+        if ($finalDns -notcontains $dn) {
+            try { $removed.Add((Get-ADGroup -Identity $dn -ErrorAction Stop).Name) } catch { $removed.Add($dn) }
+        }
+    }
+    $operationStatus = if ($operationErrors.Count) { 'partial' } else { 'success' }
     [pscustomobject]@{
-        message = "Appartenenze aggiornate per $($user.SamAccountName). Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        message = "Appartenenze verificate in Active Directory. Aggiunti: $($added.Count); rimossi: $($removed.Count)."
+        operationStatus = $operationStatus
+        error = if ($operationErrors.Count) { $operationErrors -join '; ' } else { $null }
         added = @($added)
         removed = @($removed)
+        currentMemberships = @($finalDns)
     }
 }
 
