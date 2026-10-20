@@ -48,7 +48,7 @@ Copiare l'intera cartella artifacts\DashboardAD-win-x64 sul PC di destinazione, 
 3. Inserire l'account AD dedicato e con privilegi minimi necessari.
 4. Il file CLIXML è protetto dal contesto DPAPI dell'utente Windows e dalla macchina; non copiarlo su altri PC o account.
 
-Il percorso previsto è C:\ProgramData\DashboardAD\admin-credential.xml, esterno al repository. I log JSONL sono previsti in `%ProgramData%\DashboardAD\Logs\DashboardAD.jsonl` e vengono mostrati nella sezione LOG. Proteggere entrambi con ACL appropriate.
+Il percorso previsto è `C:\ProgramData\DashboardAD\admin-credential.xml`, esterno al repository. La configurazione `%ProgramData%\DashboardAD\Logs\DashboardAD.jsonl` definisce cartella e prefisso dei log: ogni sessione crea un file JSONL dedicato con nome `DashboardAD_<operatore>_<data-ora>.jsonl`, contenente accesso, operazioni e chiusura. I file precedenti restano consultabili nella sezione LOG. Proteggere credenziali e log con ACL appropriate.
 
 ## Stato e limiti
 
