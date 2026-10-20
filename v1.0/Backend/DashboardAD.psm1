@@ -164,44 +164,104 @@ function Invoke-DashboardADUserAction {
     )
     Import-Module ActiveDirectory -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($Identity) -or $Identity.Length -gt 512) { throw 'Identità utente non valida.' }
-    $user = Get-ADUser -Identity $Identity -Properties Enabled,DistinguishedName,SamAccountName -ErrorAction Stop
-    switch ($Operation) {
-        'disableUser' {
-            if (-not $user.Enabled) { throw 'L’account è già disabilitato.' }
-            Disable-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
-            $message = "Account $($user.SamAccountName) disabilitato."
+    $user = Get-ADUser -Identity $Identity -Properties Enabled,DistinguishedName,SamAccountName,LockedOut,PasswordLastSet -ErrorAction Stop
+    $sourceOU = ($user.DistinguishedName -split ',',2)[1]
+    $destinationOuDn = $null
+    $mutationApplied = $false
+    $passwordReset = $false
+    $actionError = $null
+    $message = ''
+
+    try {
+        switch ($Operation) {
+            'disableUser' {
+                if (-not $user.Enabled) { throw 'L’account è già disabilitato.' }
+                Disable-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
+                $mutationApplied = $true
+                $message = "Account $($user.SamAccountName) disabilitato."
+            }
+            'enableUser' {
+                if ($user.Enabled) { throw 'L’account è già abilitato. Usa Reset password per modificare la password.' }
+                if ([string]::IsNullOrEmpty($Password)) { throw 'Per abilitare e sbloccare l’account è obbligatorio impostare una nuova password.' }
+                $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+                Set-ADAccountPassword -Identity $user.DistinguishedName -Reset -NewPassword $securePassword -ErrorAction Stop
+                $mutationApplied = $true
+                $passwordReset = $true
+                if ($ChangePasswordAtLogon) { Set-ADUser -Identity $user.DistinguishedName -ChangePasswordAtLogon $true -ErrorAction Stop }
+                Enable-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
+                Unlock-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
+                $message = "Password reimpostata; account $($user.SamAccountName) abilitato e sbloccato."
+            }
+            'moveUser' {
+                if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Specificare il Distinguished Name della OU di destinazione.' }
+                $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
+                if ($sourceOU -ieq $ou.DistinguishedName) { throw 'L’utente si trova già nella OU di destinazione.' }
+                $destinationOuDn = $ou.DistinguishedName
+                Move-ADObject -Identity $user.DistinguishedName -TargetPath $destinationOuDn -Confirm:$false -ErrorAction Stop
+                $mutationApplied = $true
+                $message = "Account $($user.SamAccountName) spostato in $destinationOuDn."
+            }
+            'resetPassword' {
+                if (-not $user.Enabled) { throw 'Per sicurezza, il reset password è consentito solo agli account abilitati.' }
+                if ([string]::IsNullOrEmpty($Password)) { throw 'La nuova password è obbligatoria.' }
+                $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+                Set-ADAccountPassword -Identity $user.DistinguishedName -Reset -NewPassword $securePassword -ErrorAction Stop
+                $mutationApplied = $true
+                $passwordReset = $true
+                if ($ChangePasswordAtLogon) { Set-ADUser -Identity $user.DistinguishedName -ChangePasswordAtLogon $true -ErrorAction Stop }
+                $message = "Password reimpostata per $($user.SamAccountName)."
+            }
         }
-        'enableUser' {
-            if ($user.Enabled) { throw 'L’account è già abilitato. Usa Reset password per modificare la password.' }
-            if ([string]::IsNullOrEmpty($Password)) { throw 'Per abilitare e sbloccare l’account è obbligatorio impostare una nuova password.' }
-            $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-            # Do not enable or unlock until AD confirms the password reset succeeded.
-            Set-ADAccountPassword -Identity $user.DistinguishedName -Reset -NewPassword $securePassword -ErrorAction Stop
-            if ($ChangePasswordAtLogon) { Set-ADUser -Identity $user.DistinguishedName -ChangePasswordAtLogon $true -ErrorAction Stop }
-            Enable-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
-            Unlock-ADAccount -Identity $user.DistinguishedName -ErrorAction Stop
-            $message = "Password aggiornata; account $($user.SamAccountName) abilitato e sbloccato."
-        }
-        'moveUser' {
-            if ([string]::IsNullOrWhiteSpace($DestinationOU) -or $DestinationOU.Length -gt 1024) { throw 'Specificare il Distinguished Name della OU di destinazione.' }
-            $ou = Get-ADOrganizationalUnit -Identity $DestinationOU -ErrorAction Stop
-            if (($user.DistinguishedName -split ',',2)[1] -ieq $ou.DistinguishedName) { throw 'L’utente si trova già nella OU di destinazione.' }
-            $sourceOU = ($user.DistinguishedName -split ',',2)[1]
-            Move-ADObject -Identity $user.DistinguishedName -TargetPath $ou.DistinguishedName -Confirm:$false -ErrorAction Stop
-            $message = "Account $($user.SamAccountName) spostato in $($ou.DistinguishedName)."
-        }
-        'resetPassword' {
-            if (-not $user.Enabled) { throw 'Per sicurezza, il reset password è consentito solo agli account abilitati.' }
-            if ([string]::IsNullOrEmpty($Password)) { throw 'La nuova password è obbligatoria.' }
-            $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-            Set-ADAccountPassword -Identity $user.DistinguishedName -Reset -NewPassword $securePassword -ErrorAction Stop
-            if ($ChangePasswordAtLogon) { Set-ADUser -Identity $user.DistinguishedName -ChangePasswordAtLogon $true -ErrorAction Stop }
-            $message = "Password reimpostata per $($user.SamAccountName)."
+    } catch {
+        $actionError = $_.Exception.Message
+    } finally {
+        $Password = $null
+    }
+
+    $updated = $null
+    try {
+        $updated = Get-ADUser -Identity $user.SamAccountName -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut,PasswordLastSet -ErrorAction Stop |
+            Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut,PasswordLastSet
+    } catch {
+        if ([string]::IsNullOrWhiteSpace($actionError)) { $actionError = "Verifica dello stato finale non riuscita: $($_.Exception.Message)" }
+        else { $actionError += " Verifica dello stato finale non riuscita: $($_.Exception.Message)" }
+    }
+
+    $verified = $false
+    if ($updated) {
+        switch ($Operation) {
+            'disableUser' { $verified = ($updated.Enabled -eq $false) }
+            'enableUser' { $verified = ($updated.Enabled -eq $true -and $updated.LockedOut -eq $false) }
+            'moveUser' { $verified = (($updated.DistinguishedName -split ',',2)[1] -ieq $destinationOuDn) }
+            'resetPassword' { $verified = ($passwordReset -and $updated.PasswordLastSet -and $updated.PasswordLastSet -ne $user.PasswordLastSet) }
         }
     }
-    $updated = Get-ADUser -Identity $user.SamAccountName -Properties Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut -ErrorAction Stop |
-        Select-Object Name,SamAccountName,Department,Title,Enabled,DistinguishedName,Mail,LastLogonDate,LockedOut
-    [pscustomobject]@{ message=$message; user=$updated; audit=$(if ($Operation -eq 'moveUser') { [ordered]@{ sourceOU=$sourceOU; destinationOU=$ou.DistinguishedName } } elseif ($Operation -eq 'resetPassword') { [ordered]@{ passwordReset=$true } } else { $null }) }
+
+    if (-not $mutationApplied) {
+        if (-not [string]::IsNullOrWhiteSpace($actionError)) { throw $actionError }
+        throw 'L’operazione non è stata applicata.'
+    }
+
+    $operationStatus = if ([string]::IsNullOrWhiteSpace($actionError) -and $verified) { 'success' } else { 'partial' }
+    if (-not $verified -and [string]::IsNullOrWhiteSpace($actionError)) {
+        $actionError = 'Il comando di modifica è stato eseguito, ma la verifica dello stato finale non ha confermato completamente il risultato. Controllare Active Directory.'
+    }
+    if ($operationStatus -eq 'partial') {
+        $message = "Operazione $Operation applicata almeno in parte per $($user.SamAccountName); verificare lo stato finale in Active Directory."
+    }
+
+    $audit = [ordered]@{ passwordReset = $passwordReset }
+    if ($Operation -eq 'moveUser') {
+        $audit.sourceOU = $sourceOU
+        $audit.destinationOU = $destinationOuDn
+    }
+    [pscustomobject]@{
+        message = $message
+        operationStatus = $operationStatus
+        error = $actionError
+        user = $updated
+        audit = $audit
+    }
 }
 
 function Test-DashboardADDefaultGroup {
