@@ -211,13 +211,16 @@ try {
     }
     $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
+    $safeError = [string]$_.Exception.Message
+    if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
+    if ($Operation -in @('status','dashboard')) {
+        Write-DashboardADLog -Action 'ad_connection_failed' -Target ([string]$selectedDC) -Success $false -ErrorMessage $safeError -Controller ([string]$selectedDC) -AdminAccount $(if ($credential) { $credential.UserName } else { '' }) -EventType 'ad_connection' -Status 'failed'
+    }
     if ($Operation -in $script:DashboardADMutationOperations) {
         $target = if ($Identity) { $Identity } elseif ($GroupName) { $GroupName } elseif ($UserPrincipalName) { $UserPrincipalName } else { $DisplayName }
-        $safeError = [string]$_.Exception.Message
-        if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
         Write-DashboardADLog -Action $Operation -Target $target -Success $false -ErrorMessage $safeError -Controller ([string]$selectedDC) -AdminAccount $(if ($credential) { $credential.UserName } else { '' }) -Status 'failed'
     }
-    [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message } | ConvertTo-Json -Depth 8 -Compress
+    [pscustomobject]@{ success=$false; status='failed'; operation=$Operation; query=$Query; data=$null; error=$safeError } | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $Password = $null
     if ($credential) { $credential = $null }
