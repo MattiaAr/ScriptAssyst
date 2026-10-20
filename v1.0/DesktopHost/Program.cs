@@ -189,14 +189,9 @@ internal sealed class MainForm : Form
             if (!string.IsNullOrWhiteSpace(directory))
                 Directory.CreateDirectory(directory);
 
+            // L'avvio dell'app non prova né l'identità delle credenziali AD né il controller selezionato.
+            // L'account AD effettivo e il controller vengono registrati dal backend dopo la verifica.
             string? controller = null;
-            try
-            {
-                using var config = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "DashboardAD.config.json"), Encoding.UTF8));
-                // La sessione viene registrata prima della connessione AD: non attribuire un controller non ancora verificato.
-                adminAccount ??= config.RootElement.GetProperty("ActiveDirectory").GetProperty("ExpectedAdminUsername").GetString();
-            }
-            catch { }
 
             var record = new
             {
