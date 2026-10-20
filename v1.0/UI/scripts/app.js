@@ -1071,7 +1071,7 @@ function handleMessage(event) {
         if (result.status === 'partial') {
           const audit=result.data?.DashboardADAudit||{};
           const changed=(audit.changedFields||[]).map(escapeHtml).join(', ')||'nessun campo attributo confermato';
-          const added=(audit.groupsAdded||[]).map(escapeHtml).join(', ')||'nessuno';
+          const added=(audit.groupsAdded||result.data?.groups||[]).map(escapeHtml).join(', ')||'nessuno';
           const removed=(audit.groupsRemoved||[]).map(escapeHtml).join(', ')||'nessuno';
           showResultModal('Operazione parzialmente completata', result.data?.Name||result.data?.SamAccountName||'', '<div class="modal-error"><strong>Alcune modifiche sono riuscite, altre richiedono verifica.</strong><p>Campi modificati: '+changed+'</p><p>Gruppi aggiunti: '+added+'</p><p>Gruppi rimossi: '+removed+'</p><p>'+escapeHtml(result.error||'Verifica lo stato finale in Active Directory.')+'</p></div>');
         } else {

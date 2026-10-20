@@ -83,7 +83,8 @@ function Write-DashboardADLog {
         [string]$Controller = '',
         [string]$AdminAccount = '',
         [string]$EventType = 'ad_operation',
-        [object]$Details = $null
+        [object]$Details = $null,
+        [ValidateSet('success','partial','failed')][string]$Status = 'success'
     )
     try {
         $logPath = if (-not [string]::IsNullOrWhiteSpace($env:DASHBOARDAD_SESSION_LOG_PATH)) {
@@ -109,6 +110,7 @@ function Write-DashboardADLog {
             target = $Target
             details = $Details
             success = $Success
+            status = $Status
             error = $(if ($Success -or [string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage })
             ticket = $null
         } | ConvertTo-Json -Compress -Depth 5
@@ -201,7 +203,7 @@ try {
         } elseif ($result.data -and $result.data.PSObject.Properties['groupWarnings']) {
             $auditDetails = [ordered]@{ groupsAdded = @($result.data.groups); groupWarnings = @($result.data.groupWarnings) }
         }
-        Write-DashboardADLog -Action $Operation -Target $target -Success ([bool]$result.success) -ErrorMessage $safeError -Controller $selectedDC -AdminAccount $credential.UserName -Details $auditDetails
+        Write-DashboardADLog -Action $Operation -Target $target -Success ([bool]$result.success) -ErrorMessage $safeError -Controller $selectedDC -AdminAccount $credential.UserName -Details $auditDetails -Status ([string]$result.status)
     }
     $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
@@ -209,7 +211,7 @@ try {
         $target = if ($Identity) { $Identity } elseif ($GroupName) { $GroupName } elseif ($UserPrincipalName) { $UserPrincipalName } else { $DisplayName }
         $safeError = [string]$_.Exception.Message
         if ($Password) { $safeError = $safeError.Replace($Password, '[REDACTED]') }
-        Write-DashboardADLog -Action $Operation -Target $target -Success $false -ErrorMessage $safeError -Controller ([string]$selectedDC) -AdminAccount $(if ($credential) { $credential.UserName } else { '' })
+        Write-DashboardADLog -Action $Operation -Target $target -Success $false -ErrorMessage $safeError -Controller ([string]$selectedDC) -AdminAccount $(if ($credential) { $credential.UserName } else { '' }) -Status 'failed'
     }
     [pscustomobject]@{ success=$false; operation=$Operation; query=$Query; data=$null; error=$_.Exception.Message } | ConvertTo-Json -Depth 8 -Compress
 } finally {

@@ -519,7 +519,7 @@ function New-DashboardADUser {
     }
     $message = "Utente '$Identity' creato e abilitato nella OU '$($ou.Name)'. Gruppi assegnati: $($added.Count)."
     if ($groupWarnings.Count) { $message += " ATTENZIONE: l'account esiste, ma non è stato possibile assegnare alcuni gruppi: " + ($groupWarnings -join '; ') }
-    [pscustomobject]@{ message = $message; user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
+    [pscustomobject]@{ message = $message; operationStatus = $(if ($groupWarnings.Count) { 'partial' } else { 'success' }); error = $(if ($groupWarnings.Count) { $groupWarnings -join '; ' } else { $null }); user = $created; groups = @($added); groupWarnings = @($groupWarnings) }
 }
 
 function Update-DashboardADUserGroups {
