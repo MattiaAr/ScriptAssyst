@@ -76,7 +76,7 @@ internal sealed class MainForm : Form
     {
         return string.IsNullOrWhiteSpace(Environment.UserDomainName)
             ? Environment.UserName
-            : Environment.UserDomainName + "\\\\" + Environment.UserName;
+            : Environment.UserDomainName + "\\" + Environment.UserName;
     }
 
     private string CreateSessionLogPath()
@@ -86,7 +86,7 @@ internal sealed class MainForm : Form
         var stem = Path.GetFileNameWithoutExtension(configuredPath);
         var extension = Path.GetExtension(configuredPath);
         var operatorToken = string.Concat(GetOperatorName().Select(ch =>
-            ch == '\\\\' || ch == '/' || Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
+            ch == '\\' || ch == '/' || Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
         operatorToken = operatorToken.Trim(' ', '.', '-');
         if (string.IsNullOrWhiteSpace(operatorToken)) operatorToken = "unknown-operator";
         var stamp = sessionStartedLocal.ToString("yyyyMMdd-HHmmss-fff");
