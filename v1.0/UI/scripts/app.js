@@ -892,7 +892,21 @@ function handleMessage(event) {
     return;
   }
   if (['disableUser', 'enableUser', 'moveUser', 'resetPassword'].includes(result.operation)) {
-    if (result.success && result.data) {
+    if (result.status === 'partial' && result.data) {
+      const affected = result.data.user?.SamAccountName || result.data.user?.Name || window.__DashboardADPasswordAccount || 'account';
+      const audit = result.data.audit || {};
+      const details = [];
+      if (audit.passwordReset) details.push('Password reimpostata (valore non registrato).');
+      if (audit.sourceOU) details.push('OU di origine: ' + audit.sourceOU);
+      if (audit.destinationOU) details.push('OU di destinazione: ' + audit.destinationOU);
+      state.data.users = null;
+      requestPage('users', state.queries.users || '');
+      send('dashboard');
+      closeModal();
+      showModal('Operazione parzialmente completata', affected,
+        '<div class="modal-error"><strong>La modifica è stata applicata almeno in parte, ma lo stato finale non è stato confermato completamente.</strong><p>' + escapeHtml(result.data.error || result.error || 'Verifica Active Directory.') + '</p>' + (details.length ? '<ul>' + details.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul>' : '') + '</div>',
+        '<button class="primary" data-modal-cancel>Chiudi</button>');
+    } else if (result.success && result.data) {
       const affected = result.data.user?.SamAccountName || result.data.user?.Name || 'account';
       state.data.users = null;
       requestPage('users', state.queries.users || '');
